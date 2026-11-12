@@ -1,0 +1,17 @@
+diff --git a/src/vm.c b/src/vm.c
+index 20a95979..64fd8c7a 100644
+--- a/src/vm.c
++++ b/src/vm.c
+@@ -1658,6 +1658,12 @@ static void handleConv(VMContext* ctx, uint8_t srcType, uint8_t dstType, uint8_t
+ 
+     RValue result;
+ 
++    /* AM2R diag (patch 012): a string-typed slot should never hold an array;
++       this fires when it does (the game draws "<array:...>" into text). */
++    if (val.type == RVALUE_ARRAY && (convKey == 0x60 || convKey == 0x62 || convKey == 0x64 || convKey == 0x65)) {
++        logWarn("VM: [%s] handleConv(convKey=%02X): converting ARRAY to string!\n", ctx->currentCodeName, convKey);
++    }
++
+     switch (convKey) {
+         // Identity conversions (no-op)
+         case 0x00: case 0x22: case 0x33: case 0x44: case 0x66:

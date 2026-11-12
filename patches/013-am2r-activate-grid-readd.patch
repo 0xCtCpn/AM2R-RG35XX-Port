@@ -1,0 +1,58 @@
+diff --git a/src/vm_builtins.c b/src/vm_builtins.c
+index fd95b95e..82268a74 100644
+--- a/src/vm_builtins.c
++++ b/src/vm_builtins.c
+@@ -8432,8 +8432,19 @@ static RValue builtin_instance_activate_all(MAYBE_UNUSED VMContext* ctx, MAYBE_U
+     int instances = arrlen(ctx->runner->instances);
+     repeat(instances, i) {
+         Instance* instance = ctx->runner->instances[i];
+-        if (!instance->destroyed)
+-            Runner_setActiveState(ctx->runner, ctx->runner->instances[i], true);
++        if (!instance->destroyed && !instance->active) {
++            /* AM2R fix (patch 013): activation never re-inserted the instance
++               into the spatial grid (only the active flag flipped), so anything
++               removed from the grid while inactive (position change, destroy
++               of a neighbour triggering a dirty-mark, ...) stayed collision-
++               invisible forever after reactivating -- e.g. floors after the
++               pause menu. Mark dirty so the next syncGrid re-inserts it. */
++            bool wasGridless = (Collision_getSprite(ctx->dataWin, instance) != nullptr && arrlen(instance->collisionCells) == 0);
++            Runner_setActiveState(ctx->runner, instance, true);
++            SpatialGrid_markInstanceAsDirty(ctx->runner->spatialGrid, instance);
++            if (wasGridless)
++                logWarn("AM2R diag: activate_all re-added grid-less instance %d (%s) at (%f,%f)\n", instance->instanceId, ctx->dataWin->objt.objects[instance->objectIndex].name, instance->x, instance->y);
++        }
+     }
+     return RValue_makeUndefined();
+ }
+@@ -8448,7 +8459,14 @@ static RValue builtin_instance_activate_object(VMContext* ctx, RValue* args, int
+     int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
+     for (int32_t i = snapBase; snapEnd > i; i++) {
+         Instance* instance = runner->instanceSnapshots[i];
+-        if (!instance->active && !instance->destroyed) Runner_setActiveState(ctx->runner, instance, true);
++        if (!instance->active && !instance->destroyed) {
++            /* AM2R fix (patch 013): same spatial-grid re-add as activate_all. */
++            bool wasGridless = (Collision_getSprite(dataWin, instance) != nullptr && arrlen(instance->collisionCells) == 0);
++            Runner_setActiveState(ctx->runner, instance, true);
++            SpatialGrid_markInstanceAsDirty(runner->spatialGrid, instance);
++            if (wasGridless)
++                logWarn("AM2R diag: activate_object re-added grid-less instance %d (%s) at (%f,%f)\n", instance->instanceId, dataWin->objt.objects[instance->objectIndex].name, instance->x, instance->y);
++        }
+     }
+     Runner_popInstanceSnapshot(runner, snapBase);
+     return RValue_makeUndefined();
+@@ -8501,7 +8519,14 @@ static RValue builtin_instance_activate_region(VMContext* ctx, RValue* args, int
+             }
+         }
+ 
+-        if (outside != wantInside) Runner_setActiveState(ctx->runner, inst, true);
++        if (outside != wantInside) {
++            /* AM2R fix (patch 013): same spatial-grid re-add as activate_all. */
++            bool wasGridless = (Collision_getSprite(dataWin, inst) != nullptr && arrlen(inst->collisionCells) == 0);
++            Runner_setActiveState(ctx->runner, inst, true);
++            SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
++            if (wasGridless)
++                logWarn("AM2R diag: activate_region re-added grid-less instance %d (%s) at (%f,%f)\n", inst->instanceId, dataWin->objt.objects[inst->objectIndex].name, inst->x, inst->y);
++        }
+     }
+     return RValue_makeUndefined();
+ }
