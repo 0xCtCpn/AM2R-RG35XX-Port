@@ -1,0 +1,22 @@
+diff --git a/src/spatial_grid.c b/src/spatial_grid.c
+index e9efcc6b..c7e319cd 100644
+--- a/src/spatial_grid.c
++++ b/src/spatial_grid.c
+@@ -101,6 +101,17 @@ void SpatialGrid_markInstanceAsDirty(SpatialGrid* grid, Instance* dirtyInstance)
+ 
+     if (!dirtyInstance->active || dirtyInstance->destroyed) {
+         // Destroyed instances are updated instantly because, if we didn't, we would need to track the ID + all grids that the instance is in
++        /* AM2R diag (patch 014): stripping a live-but-inactive instance from the
++           grid is the suspected cause of post-pause collision loss (60 solids
++           got stripped+re-added every step after the pause). Log the first ones
++           with the caller address (decode offline with nm: ret - base + nm_addr). */
++        static int am2rStripDiag = 0;
++        if (!dirtyInstance->destroyed && arrlen(dirtyInstance->collisionCells) > 0 && 60 > am2rStripDiag) {
++            am2rStripDiag++;
++            logWarn("AM2R diag: grid-strip inactive inst %d at (%f,%f) cells=%d ret=%p base=%p [#%d]\n",
++                (int) dirtyInstance->instanceId, (double) dirtyInstance->x, (double) dirtyInstance->y,
++                (int) arrlen(dirtyInstance->collisionCells), __builtin_return_address(0), am2rDiagImageBase(), am2rStripDiag);
++        }
+         removeInstanceFromGridCells(grid, dirtyInstance);
+         return;
+     }

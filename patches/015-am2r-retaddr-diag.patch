@@ -1,0 +1,47 @@
+diff --git a/src/rvalue.h b/src/rvalue.h
+index 06fd5a17..b169e1d4 100644
+--- a/src/rvalue.h
++++ b/src/rvalue.h
+@@ -317,9 +317,17 @@ static inline char* RValue_toString(RValue val) {
+             return safeStrdup(val.int32 ? "1" : "0");
+         case RVALUE_UNDEFINED:
+             return safeStrdup("undefined");
+-        case RVALUE_ARRAY:
++        case RVALUE_ARRAY: {
++            /* AM2R diag (patch 015): identify who stringifies arrays into
++               game text (decode offline: caller = nm_addr + ret - base). */
++            static int am2rArrDiag = 0;
++            if (20 > am2rArrDiag) {
++                am2rArrDiag++;
++                logWarn("AM2R diag: array-to-string #%d ret=%p base=%p\n", am2rArrDiag, __builtin_return_address(0), am2rDiagImageBase());
++            }
+             snprintf(buf, sizeof(buf), "<array:%p>", (void*) val.array);
+             return safeStrdup(buf);
++        }
+ #if IS_WAD17_OR_HIGHER_ENABLED
+         case RVALUE_METHOD:
+             snprintf(buf, sizeof(buf), "<method:%d>", val.method->codeIndex);
+diff --git a/src/utils.h b/src/utils.h
+index eca71eab..b0a9d263 100644
+--- a/src/utils.h
++++ b/src/utils.h
+@@ -194,4 +194,19 @@ typedef struct {
+     bool value;
+ } StringBooleanEntry;
+ 
++/* AM2R diag (patch 015): PIE image base for decoding __builtin_return_address
++   offline against the symbol table (dladdr is hidden behind _GNU_SOURCE). */
++static inline void* am2rDiagImageBase(void) {
++    FILE* f = fopen("/proc/self/maps", "r");
++    if (f == nullptr) return nullptr;
++    char line[256];
++    void* base = nullptr;
++    if (fgets(line, sizeof(line), f) != nullptr) {
++        unsigned long start = 0;
++        if (sscanf(line, "%lx-", &start) == 1) base = (void*) start;
++    }
++    fclose(f);
++    return base;
++}
++
+ #endif /* _BS_UTILS_H_ */
