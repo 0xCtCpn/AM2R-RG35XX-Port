@@ -1,8 +1,19 @@
 diff --git a/src/rvalue.h b/src/rvalue.h
-index 06fd5a17..b169e1d4 100644
+index 06fd5a17..95396a40 100644
 --- a/src/rvalue.h
 +++ b/src/rvalue.h
-@@ -317,9 +317,17 @@ static inline char* RValue_toString(RValue val) {
+@@ -282,7 +282,9 @@ static inline RValue RValue_stealOwnershipOrCopy(RValue val) {
+ 
+ // Converts an RValue to a heap-allocated string representation.
+ // The caller must free the returned string
+-static inline char* RValue_toString(RValue val) {
++/* AM2R diag (patch 015): noinline so __builtin_return_address inside the ARRAY
++   case names the actual caller builtin instead of the VM dispatch loop. */
++static inline __attribute__((noinline)) char* RValue_toString(RValue val) {
+     char buf[64];
+     switch (val.type) {
+         case RVALUE_REAL: {
+@@ -317,9 +319,17 @@ static inline char* RValue_toString(RValue val) {
              return safeStrdup(val.int32 ? "1" : "0");
          case RVALUE_UNDEFINED:
              return safeStrdup("undefined");
@@ -11,7 +22,7 @@ index 06fd5a17..b169e1d4 100644
 +            /* AM2R diag (patch 015): identify who stringifies arrays into
 +               game text (decode offline: caller = nm_addr + ret - base). */
 +            static int am2rArrDiag = 0;
-+            if (20 > am2rArrDiag) {
++            if (60 > am2rArrDiag) {
 +                am2rArrDiag++;
 +                logWarn("AM2R diag: array-to-string #%d ret=%p base=%p\n", am2rArrDiag, __builtin_return_address(0), am2rDiagImageBase());
 +            }
@@ -22,23 +33,30 @@ index 06fd5a17..b169e1d4 100644
          case RVALUE_METHOD:
              snprintf(buf, sizeof(buf), "<method:%d>", val.method->codeIndex);
 diff --git a/src/utils.h b/src/utils.h
-index eca71eab..b0a9d263 100644
+index eca71eab..ae9cb6a5 100644
 --- a/src/utils.h
 +++ b/src/utils.h
-@@ -194,4 +194,19 @@ typedef struct {
+@@ -194,4 +194,26 @@ typedef struct {
      bool value;
  } StringBooleanEntry;
  
++#include <string.h>
++
 +/* AM2R diag (patch 015): PIE image base for decoding __builtin_return_address
-+   offline against the symbol table (dladdr is hidden behind _GNU_SOURCE). */
++   offline against the symbol table (dladdr is hidden behind _GNU_SOURCE).
++   Scan /proc/self/maps for our own exe instead of trusting the first line
++   (run #5 proved the first line can be an unrelated low mapping). */
 +static inline void* am2rDiagImageBase(void) {
 +    FILE* f = fopen("/proc/self/maps", "r");
 +    if (f == nullptr) return nullptr;
-+    char line[256];
++    char line[512];
 +    void* base = nullptr;
-+    if (fgets(line, sizeof(line), f) != nullptr) {
-+        unsigned long start = 0;
-+        if (sscanf(line, "%lx-", &start) == 1) base = (void*) start;
++    while (fgets(line, sizeof(line), f) != nullptr) {
++        if (strstr(line, "butterscotch") != nullptr) {
++            unsigned long start = 0;
++            if (sscanf(line, "%lx-", &start) == 1) base = (void*) start;
++            break;
++        }
 +    }
 +    fclose(f);
 +    return base;

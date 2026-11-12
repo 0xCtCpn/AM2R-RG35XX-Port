@@ -1,0 +1,25 @@
+diff --git a/src/spatial_grid.c b/src/spatial_grid.c
+index c7e319cd..7d4bcc32 100644
+--- a/src/spatial_grid.c
++++ b/src/spatial_grid.c
+@@ -76,8 +76,19 @@ void SpatialGrid_syncGrid(Runner* runner, SpatialGrid* grid) {
+ 
+         arrsetlen(instance->collisionCells, 0);
+ 
+-        if (!bbox.valid)
++        if (!bbox.valid) {
++            /* AM2R diag (patch 016): instances silently drop out of the grid here
++               when the collision sprite lookup fails (this is the only remaining
++               path to grid-less besides the markDirty removal branch). */
++            static int am2rDropDiag = 0;
++            if (80 > am2rDropDiag) {
++                am2rDropDiag++;
++                logWarn("AM2R diag: sync-drop bbox-invalid inst %d spr=%d mask=%d at (%f,%f) [#%d]\n",
++                    (int) instance->instanceId, instance->spriteIndex, instance->maskIndex,
++                    (double) instance->x, (double) instance->y, am2rDropDiag);
++            }
+             continue;
++        }
+ 
+         SpatialGridRange range = SpatialGrid_computeCellRange(grid, bbox.left, bbox.top, bbox.right, bbox.bottom);
+ 
