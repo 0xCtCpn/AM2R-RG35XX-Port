@@ -17,9 +17,8 @@ COPY patches /build/patches
 # Alsa-lib for ARM (glibc) FIRST: SDL 1.2 configure needs its headers/lib at
 # configure time or it silently disables the ALSA audio driver (happened on
 # the Undertale port: libSDL had no "ALSA PCM audio" bootstrap -> SDL_OpenAudio
-# "No available audio device" on-device). The result is ONLY used to link
-# SDL against -lasound; the cross-built libasound.so itself is deliberately
-# NOT shipped (see CMD below).
+# "No available audio device" on-device). The cross-built libasound.so is ONLY
+# used at link time; it is deliberately NOT shipped (see CMD below).
 RUN curl -sSL --retry 3 --retry-all-errors https://www.alsa-project.org/files/pub/lib/alsa-lib-1.2.12.tar.bz2 -o alsa.tar.bz2 && \
     tar xjf alsa.tar.bz2 && cd alsa-lib-1.2.12 && \
     CC=arm-linux-gnueabihf-gcc CFLAGS="-march=armv7-a -mfpu=neon -mfloat-abi=hard -O2" \
@@ -50,10 +49,15 @@ RUN git clone --depth 1 --branch release-1.2.15 https://github.com/libsdl-org/SD
          && echo "SDL alsa driver OK" \
          || (echo "SDL built WITHOUT alsa audio driver"; exit 1)
 
-# Patches + pin check: ButterscotchRunner upstream @ 0c94bfb (2026-11-11).
-# This pin is REQUIRED for AM2R: GM:S string interpolation (all AM2R text)
-# was implemented in c1260061 (2026-11-01); older pins like 92ed6b8 (the
-# Undertale port) render every AM2R string as "[!]" (Butterscotch issue #486).
+# Patches + pin check: cobaltgit/Butterscotch @ 92ed6b8 (2026-08-24) - the SAME
+# pin as the Undertale MiaUI port, whose on-device behavior (input mapping,
+# SDL1 fbcon video, sdl1/ALSA audio path, joystick perf) is fully proven.
+# This pin retains the software renderer (src/sw/) which the newer
+# ButterscotchRunner upstream has deleted. The one thing the pin lacks for
+# AM2R - GM:S string() placeholder substitution, without which every AM2R
+# formatted string renders as "[!]" (Butterscotch issue #486) - is backported
+# as patches/009-am2r-string-placeholder.patch (adapted from upstream
+# c1260061, 2026-11-01).
 # NOTE: the host upstream tree may be left with patches applied (gen_patches
 # leaves the verification chain applied; probes may too) - reset to the pin
 # FIRST so the apply loop always starts from pristine.
@@ -61,7 +65,7 @@ RUN cd /build/upstream && \
     git rev-parse HEAD && \
     git reset --hard HEAD && \
     git clean -fd src/ && \
-    test "$(git rev-parse HEAD)" = "0c94bfb05e3cb4b8946a38f8085747035dd37f94" && \
+    test "$(git rev-parse HEAD)" = "92ed6b8c3766361a201a69d202bcde5873cdad7e" && \
     echo "butterscotch pin OK" && \
     for p in /build/patches/*.patch; do \
       echo "applying $p" && \
@@ -69,15 +73,17 @@ RUN cd /build/upstream && \
     done && \
     git diff --stat
 
-# Butterscotch for AM2R: PLATFORM=cli BACKEND=sdl1 AUDIO_BACKEND=sdl1,
-# SW only, WAD 14 ONLY - AM2R 1.1 is a GM:S 1.4 WAD-14 game (Butterscotch
-# compatibility issue #50). WAD-specific builds keep the interpreter hot path
-# small (same practice as upstream console builds).
+# Butterscotch for AM2R: PLATFORM=cli BACKEND=sdl1 AUDIO_BACKEND=sdl1 (the
+# proven Undertale audio path - SDL audio -> libasound -> system ALSA stack),
+# SW renderer only (no GL on this device), WAD 14 ONLY - AM2R 1.1 is a GM:S
+# 1.4 WAD-14 game (Butterscotch compatibility issue #50). WAD-specific builds
+# keep the interpreter hot path small (same practice as upstream console
+# builds).
 RUN cd /build/upstream && \
     cmake -B build -G Ninja \
       -DCMAKE_TOOLCHAIN_FILE=/build/toolchain-glibc.cmake \
       -DPLATFORM=cli -DBACKEND=sdl1 -DAUDIO_BACKEND=sdl1 \
-      -DENABLE_LEGACY_GL=OFF -DENABLE_MODERN_GL=OFF \
+      -DENABLE_SW_RENDERER=ON -DENABLE_LEGACY_GL=OFF -DENABLE_MODERN_GL=OFF \
       -DENABLE_WAD14=ON -DENABLE_WAD16=OFF -DENABLE_WAD17=OFF \
       -DENABLE_VM_GML_PROFILER=OFF -DENABLE_VM_TRACING=OFF \
       -DENABLE_VM_OPCODE_PROFILER=OFF -DENABLE_VM_STUB_LOGS=OFF \

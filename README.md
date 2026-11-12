@@ -10,7 +10,7 @@ This repo builds AM2R for the Anbernic RG35XX running MiaUI. It cross-compiles t
 
 The build is fully reproducible from source via Docker: run `build.bat` and the binaries land in `out/`. You need to provide your own copy of AM2R — it is not included in the repo or the release.
 
-The build is WAD 14-only (AM2R 1.1 is a GameMaker: Studio 1.4 / WAD 14 game) and pinned to upstream `0c94bfb` (2026-11-11), which includes the string-interpolation fix (Butterscotch issue #486) — without it, every AM2R text string renders as `[!]`.
+The build is WAD 14-only (AM2R 1.1 is a GameMaker: Studio 1.4 / WAD 14 game) and pinned to the same upstream commit as the Undertale port (`92ed6b8`, which still has the software renderer this device needs). AM2R's text needs one newer fix — GM:S `string()` placeholder substitution (Butterscotch issue #486) — which is backported as `patches/009-am2r-string-placeholder.patch`.
 
 ## Install
 
@@ -58,7 +58,7 @@ What the build does (`Dockerfile`):
 * Starts from `debian:bookworm`, installs compilers and build tools
 * Cross-compiles alsa-lib for ARM (glibc) **first** - SDL 1.2's configure silently drops its ALSA driver without it, which surfaces on-device as "No available audio device". The cross-built libasound is only used at link time and is deliberately **not** shipped (see below)
 * Cross-compiles SDL 1.2.15 with the fbcon video driver (`--enable-video-fbcon`, `--enable-alsa`) and hard-fails if the ALSA bootstrap string is missing
-* Resets the vendored `upstream/` to the pinned commit (`0c94bfb`), applies `patches/*.patch` (fails hard on any mismatch), then builds Butterscotch with `PLATFORM=cli BACKEND=sdl1 AUDIO_BACKEND=sdl1`, WAD 14-only, no GL renderers
+* Resets the vendored `upstream/` to the pinned commit (`92ed6b8`), applies `patches/*.patch` — including 009, the AM2R text fix (fails hard on any mismatch), then builds Butterscotch with `PLATFORM=cli BACKEND=sdl1 AUDIO_BACKEND=sdl1`, the software renderer, and WAD 14-only
 * Prints checks at the end: the binary's `INTERP` (want `/lib/ld-linux-armhf.so.3`) and its `NEEDED` libraries
 
 To install your own build: copy `out/*` + `launch.sh` to SD `ROMS/Ports/AM2R.pak/`, then copy your AM2R files into the same folder.
@@ -77,7 +77,8 @@ Performance note: AM2R is heavier than Undertale (bigger rooms, more instances).
 
 Thanks to:
 
-* [ButterscotchRunner](https://github.com/ButterscotchRunner/Butterscotch) — Butterscotch GameMaker runner (AGPLv3, pinned at `0c94bfb`, vendored under `upstream/`)
+* [cobaltgit](https://github.com/cobaltgit/Butterscotch) — Butterscotch GameMaker runner (AGPLv3, pinned at `92ed6b8`, vendored under `upstream/`)
+* [ButterscotchRunner](https://github.com/ButterscotchRunner/Butterscotch) — active upstream development, source of the `string()` placeholder fix backported in patch 009
 * DoctorM64 and the AM2R community team — AM2R
 * DSkywalk for [MiaUI](https://github.com/miaui-cfw/MiaUI-GPU-RG35XX)
 * libsdl and ALSA upstreams for the bundled dependencies

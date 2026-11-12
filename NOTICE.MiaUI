@@ -2,28 +2,35 @@ AM2R (Another Metroid 2 Remake) - MiaUI (RG35XX) Port
 Copyright 2026 0xCtCpn
 Distributed under the GNU Affero General Public License, version 3 or later.
 
-MiaUI modifications vs upstream ButterscotchRunner/Butterscotch (pinned at
-0c94bfb05e3cb4b8946a38f8085747035dd37f94):
+MiaUI modifications vs upstream cobaltgit/Butterscotch (pinned at
+92ed6b8c3766361a201a69d202bcde5873cdad7e - the same commit as the Undertale
+MiaUI port):
 
 - patches/001-rg35xx-fallback-mapping.patch (new): createFallbackMappings()
   for the RG35XX gpio-keys pad (dpad at sdl 13-16, volume key at 12)
 - patches/002-chunklog.patch, patches/003-stage-markers.patch,
-  patches/005-sdl1-error.patch, patches/006-fpslog.patch: diagnostics
-  (chunk/stage/FPSLOG markers, SDL_GetError() in init failures)
+  patches/004-sdl-error.patch, patches/005-sdl1-error.patch,
+  patches/006-fpslog.patch: diagnostics (chunk/stage/FPSLOG markers,
+  SDL_GetError() in init failures)
 - patches/007-joyname-cache.patch: cache SDL_JoystickName() per slot
   (SDL 1.2 opens the device + issues ioctls every call; ~50ms/frame)
 - patches/008-exit-cursor.patch: Select + Start held together quits
   cleanly; the fbcon stub cursor (which never moves and sits in a corner)
   is always hidden
+- patches/009-am2r-string-placeholder.patch: backport of Butterscotch
+  c1260061 "support placeholder substitution in string()" (issue #486) -
+  without it every AM2R formatted string renders as "[!]"; adapted to the
+  pinned tree's APIs (single-arg RValue_toString, freed by the patch)
 - Dockerfile retargeted to arm-buildroot-linux-gnueabihf (glibc 2.37,
   INTERP /lib/ld-linux-armhf.so.3), SDL1.2 fbcon + ALSA, software renderer,
   WAD 14-only interpreter build (AM2R is a GM:S 1.4 WAD-14 game)
 - launch.sh: ROMs/Ports/AM2R.pak/ layout, SDL_VIDEODRIVER=fbcon,
   SDL_NOMOUSE=1, CPU governor pinning, debug.log probe
 
-The upstream pin (0c94bfb, 2026-11-11) is newer than the Undertale port's
-(92ed6b8) on purpose: GM:S string interpolation - which renders all AM2R
-text - was implemented in c1260061 (2026-11-01, Butterscotch issue #486).
+The pin matches the Undertale port (not the newer ButterscotchRunner
+upstream) on purpose: that upstream has deleted the software renderer this
+port requires, while the pin's one AM2R-critical gap (string() placeholder
+substitution) is covered by patch 009.
 
 Upstream code retains its own licenses; see upstream/LICENSE (AGPLv3).
 Upstream is vendored under upstream/ and is re-cloneable at the pinned

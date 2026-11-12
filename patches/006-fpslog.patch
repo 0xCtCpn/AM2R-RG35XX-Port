@@ -1,8 +1,8 @@
 diff --git a/src/backends/sdl1.c b/src/backends/sdl1.c
-index f5da435..27a0b98 100644
+index 49767b7..d173c12 100644
 --- a/src/backends/sdl1.c
 +++ b/src/backends/sdl1.c
-@@ -550,8 +550,21 @@ static int32_t SDLMouseButtonToGml(int sdlButton) {
+@@ -544,9 +544,21 @@ static int32_t SDLMouseButtonToGml(int sdlButton) {
      }
  }
  
@@ -19,12 +19,12 @@ index f5da435..27a0b98 100644
 +        fpsSdlUpdSum += _udd; fpsSdlUpdN++;
 +        if (_udd > fpsSdlUpdMax) fpsSdlUpdMax = _udd;
 +    }
-+
-+    uint64_t _slot0 = nowNanos();
  
++    uint64_t _slot0 = nowNanos();
      g_runner->gamepads->connectedCount = 0;
      for (int slotIdx = 0; slotIdx < MAX_GAMEPADS; slotIdx++) {
-@@ -628,6 +641,11 @@ bool platformHandleEvents(void) {
+         GamepadSlot* slot = g_runner->gamepads->slots + slotIdx;
+@@ -622,6 +634,11 @@ bool platformHandleEvents(void) {
          } else {
              slot->connected = false;
          }
@@ -36,7 +36,7 @@ index f5da435..27a0b98 100644
      }
  
      SDL_Event e;
-@@ -680,6 +698,11 @@ bool platformHandleEvents(void) {
+@@ -674,6 +691,11 @@ bool platformHandleEvents(void) {
              case SDL_QUIT:
                  return true;
          }
@@ -49,12 +49,12 @@ index f5da435..27a0b98 100644
  
      return false;
 diff --git a/src/loop.c b/src/loop.c
-index 7e24d24..386aa82 100644
+index 6bbfd19..ac8a765 100644
 --- a/src/loop.c
 +++ b/src/loop.c
-@@ -1063,6 +1063,15 @@ int loop(CommandLineArgs args, const char *argv0) {
+@@ -970,6 +970,15 @@ int loop(CommandLineArgs args, const char *argv0) {
+         bool freeCamActive = false;
          bool actuallyShuttingDown = false;
-         bool wasPaused = false;
          uint64_t lastFrameTime = nowNanos();
 +        /* Onion diagnostics (patch 006): counters shared with sdl1.c */
 +        extern double fpsSdlUpdSum, fpsSdlUpdMax, fpsSdlUpdN;
@@ -68,7 +68,7 @@ index 7e24d24..386aa82 100644
          uint64_t lastFrameStartTime = lastFrameTime; // for delta_time
          bool shouldWindowClose = false;
          while (true) {
-@@ -1084,10 +1093,16 @@ int loop(CommandLineArgs args, const char *argv0) {
+@@ -991,10 +1000,16 @@ int loop(CommandLineArgs args, const char *argv0) {
              RunnerKeyboard_beginFrame(runner->keyboard);
              RunnerGamepad_beginFrame(runner->gamepads);
              RunnerMouse_beginFrame(runner->mouse);
@@ -82,24 +82,27 @@ index 7e24d24..386aa82 100644
 +                fpsPhEv += _evd; fpsPhEvN++;
 +                if (_evd > fpsPhEvMax) fpsPhEvMax = _evd;
 +            }
-             
-             if (RunnerKeyboard_checkPressed(runner->keyboard, VK_F8)) {
-                 bool isPaused = Runner_isPaused(runner);
-@@ -1478,6 +1493,11 @@ int loop(CommandLineArgs args, const char *argv0) {
-             if (shouldStep) {
-                 Runner_handlePendingRoomChange(runner);
-             }
-+            {
-+                double _sd = (double) (nowNanos() - frameStartNow);
-+                fpsPhStep += _sd; fpsPhStepN++;
-+                if (_sd > fpsPhStepMax) fpsPhStepMax = _sd;
-+            }
  
-             if (RunnerKeyboard_checkPressed(runner->keyboard, VK_BACKSPACE)) {
+             // Debug key bindings
+             if (runner->debugMode) {
+@@ -1287,9 +1302,11 @@ int loop(CommandLineArgs args, const char *argv0) {
+                 if (runner->pendingRoom == -1)
+                     platformSwapBuffers();
+                 Runner_handlePendingRoomChange(runner);
+-            }
+-
+-            if (RunnerKeyboard_checkPressed(runner->keyboard, VK_BACKSPACE)) {
++                {
++                    double _sd = (double) (nowNanos() - frameStartNow);
++                    fpsPhStep += _sd; fpsPhStepN++;
++                    if (_sd > fpsPhStepMax) fpsPhStepMax = _sd;
++                }
                  size_t bytes_used = get_used_memory();
-@@ -1501,9 +1521,52 @@ int loop(CommandLineArgs args, const char *argv0) {
+                 if (bytes_used == 0)
+                     logWarn("Unable to get memory usage\n");
+@@ -1308,9 +1325,52 @@ int loop(CommandLineArgs args, const char *argv0) {
                  double effectiveSpeed = (args.fastForwardSpeed > 0.0 && fastForwardActive) ? args.fastForwardSpeed : args.speedMultiplier;
-                 uint64_t targetFrameTime = 1000000000 / (effectiveGameSpeed * effectiveSpeed);
+                 uint64_t targetFrameTime = 1000000000 / (runner->currentRoom->speed * effectiveSpeed);
                  uint64_t nextFrameTime = lastFrameTime + targetFrameTime;
 +                uint64_t _sleepT0 = nowNanos();
                  platformSleepUntil(nextFrameTime);
