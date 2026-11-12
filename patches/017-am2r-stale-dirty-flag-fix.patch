@@ -1,0 +1,40 @@
+diff --git a/src/spatial_grid.c b/src/spatial_grid.c
+index 7d4bcc32..eedb1656 100644
+--- a/src/spatial_grid.c
++++ b/src/spatial_grid.c
+@@ -62,9 +62,22 @@ void SpatialGrid_syncGrid(Runner* runner, SpatialGrid* grid) {
+         int32_t instanceId = grid->dirtyInstances[i];
+         Instance* instance = hmget(runner->instancesById, instanceId);
+ 
+-        // We do not care about removed/inactive/destroyed instances, because they would've been already been removed from the grid on the "SpatialGrid_markInstanceAsDirty" call
+-        // We also do not care if the spatial grid is not dirty
+-        if (instance == nullptr || !instance->active || instance->destroyed || !instance->spatialGridDirty)
++        if (instance == nullptr)
++            continue;
++
++        /* AM2R fix (patch 017): an instance queued for sync while active but
++           deactivated before this sync ran used to keep spatialGridDirty set
++           forever (the dirty list is cleared below), which turned every later
++           markInstanceAsDirty call into a silent no-op -- the instance could
++           never re-enter the grid after being reactivated (room floors stayed
++           collision-invisible after the pause menu reloaded the room). Clear
++           the stale flag so a later markInstanceAsDirty can queue it again. */
++        if (!instance->active || instance->destroyed) {
++            instance->spatialGridDirty = false;
++            continue;
++        }
++
++        if (!instance->spatialGridDirty)
+             continue;
+ 
+         instance->spatialGridDirty = false;
+@@ -124,6 +137,9 @@ void SpatialGrid_markInstanceAsDirty(SpatialGrid* grid, Instance* dirtyInstance)
+                 (int) arrlen(dirtyInstance->collisionCells), __builtin_return_address(0), am2rDiagImageBase(), am2rStripDiag);
+         }
+         removeInstanceFromGridCells(grid, dirtyInstance);
++        /* AM2R fix (patch 017): the cells list must reflect actual grid
++           membership, otherwise grid-less checks (patch 013) see stale cells. */
++        arrsetlen(dirtyInstance->collisionCells, 0);
+         return;
+     }
+ 

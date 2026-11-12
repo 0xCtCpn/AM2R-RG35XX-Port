@@ -1,0 +1,56 @@
+diff --git a/src/vm_builtins.c b/src/vm_builtins.c
+index 61495831..b6ab824d 100644
+--- a/src/vm_builtins.c
++++ b/src/vm_builtins.c
+@@ -10158,6 +10158,36 @@ static RValue builtin_draw_text(VMContext* ctx, RValue* args, MAYBE_UNUSED int32
+     Runner* runner = ctx->runner;
+     if (runner->renderer == nullptr) return RValue_makeUndefined();
+ 
++    /* AM2R diag (patch 018): the game feeds an ARRAY as text into draw_text
++       (run #6 decoded the array-to-string ret into builtin_draw_text). Dump
++       the array's shape + content to find what the game put there. */
++    if (args[2].type == RVALUE_ARRAY) {
++        static int am2rTxtDiag = 0;
++        if (30 > am2rTxtDiag) {
++            am2rTxtDiag++;
++            GMLArray* am2rArr = args[2].array;
++            if (am2rArr == nullptr) {
++                logWarn("AM2R diag: draw_text ARRAY(null) from [%s] [#%d]\n", ctx->currentCodeName, am2rTxtDiag);
++            } else if (am2rArr->type == GML_LEGACY_ARRAY) {
++                logWarn("AM2R diag: draw_text ARRAY from [%s]: legacy rows=%d [#%d]\n", ctx->currentCodeName, am2rArr->legacy.rowCount, am2rTxtDiag);
++                for (int am2rR = 0; am2rArr->legacy.rowCount > am2rR && 4 > am2rR; am2rR++) {
++                    GMLArrayRow* am2rRow = &am2rArr->legacy.rows[am2rR];
++                    if (am2rRow->data == nullptr || 0 >= am2rRow->length) continue;
++                    char am2rBuf[512];
++                    int am2rOff = 0;
++                    for (int am2rJ = 0; am2rRow->length > am2rJ && 8 > am2rJ; am2rJ++) {
++                        char* am2rS = RValue_toStringFancy(am2rRow->data[am2rJ]);
++                        am2rOff += snprintf(am2rBuf + am2rOff, sizeof(am2rBuf) - am2rOff, " %s", am2rS);
++                        free(am2rS);
++                        if (am2rOff >= (int) sizeof(am2rBuf) - 16) break;
++                    }
++                    logWarn("AM2R diag:   row %d len=%d:%s\n", am2rR, am2rRow->length, am2rBuf);
++                }
++            } else {
++                logWarn("AM2R diag: draw_text ARRAY from [%s]: modern len=%d [#%d]\n", ctx->currentCodeName, am2rArr->modern.length, am2rTxtDiag);
++            }
++        }
++    }
+     float x = (float) RValue_toReal(args[0]);
+     float y = (float) RValue_toReal(args[1]);
+     char* str = RValue_toString(args[2]);
+@@ -11312,6 +11342,14 @@ static RValue builtin_string_width(VMContext* ctx, RValue* args, int32_t argCoun
+     if (0 > fontIndex || renderer->dataWin->font.count <= (uint32_t) fontIndex) return RValue_makeReal(0.0);
+ 
+     Font* font = &renderer->dataWin->font.fonts[fontIndex];
++    /* AM2R diag (patch 018): array text also flows through string_width. */
++    if (args[0].type == RVALUE_ARRAY) {
++        static int am2rWidDiag = 0;
++        if (10 > am2rWidDiag) {
++            am2rWidDiag++;
++            logWarn("AM2R diag: string_width ARRAY from [%s] [#%d]\n", ctx->currentCodeName, am2rWidDiag);
++        }
++    }
+     char* str = RValue_toString(args[0]);
+ 
+     PreprocessedText processed = TextUtils_preprocessGmlTextIfNeeded(runner, str);
