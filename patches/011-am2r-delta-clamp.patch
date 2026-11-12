@@ -1,0 +1,18 @@
+diff --git a/src/loop.c b/src/loop.c
+index ac8a7659..5062d00a 100644
+--- a/src/loop.c
++++ b/src/loop.c
+@@ -996,6 +996,13 @@ int loop(CommandLineArgs args, const char *argv0) {
+             runner->deltaTime = (int64_t)(frameStartNow - lastFrameStartTime) / 1000.0;
+             lastFrameStartTime = frameStartNow;
+ 
++            /* AM2R fix (patch 011): mid-game room/texture loads stall a frame
++               (observed max=408ms on-device) and delta_time is handed to the
++               game unclamped, so delta_time-driven movement tunnels through
++               floors. Clamp the reported delta to 100ms; fixed-step scheduling
++               is unaffected. */
++            if (runner->deltaTime > 100000.0) runner->deltaTime = 100000.0;
++
+             // Clear last frame's pressed/released state, then poll new input events
+             RunnerKeyboard_beginFrame(runner->keyboard);
+             RunnerGamepad_beginFrame(runner->gamepads);
