@@ -1,0 +1,34 @@
+AM2R (Another Metroid 2 Remake) - MiaUI (RG35XX) Port
+Copyright 2026 0xCtCpn
+Distributed under the GNU Affero General Public License, version 3 or later.
+
+MiaUI modifications vs upstream ButterscotchRunner/Butterscotch (pinned at
+0c94bfb05e3cb4b8946a38f8085747035dd37f94):
+
+- patches/001-rg35xx-fallback-mapping.patch (new): createFallbackMappings()
+  for the RG35XX gpio-keys pad (dpad at sdl 13-16, volume key at 12)
+- patches/002-chunklog.patch, patches/003-stage-markers.patch,
+  patches/005-sdl1-error.patch, patches/006-fpslog.patch: diagnostics
+  (chunk/stage/FPSLOG markers, SDL_GetError() in init failures)
+- patches/007-joyname-cache.patch: cache SDL_JoystickName() per slot
+  (SDL 1.2 opens the device + issues ioctls every call; ~50ms/frame)
+- patches/008-exit-cursor.patch: Select + Start held together quits
+  cleanly; the fbcon stub cursor (which never moves and sits in a corner)
+  is always hidden
+- Dockerfile retargeted to arm-buildroot-linux-gnueabihf (glibc 2.37,
+  INTERP /lib/ld-linux-armhf.so.3), SDL1.2 fbcon + ALSA, software renderer,
+  WAD 14-only interpreter build (AM2R is a GM:S 1.4 WAD-14 game)
+- launch.sh: ROMs/Ports/AM2R.pak/ layout, SDL_VIDEODRIVER=fbcon,
+  SDL_NOMOUSE=1, CPU governor pinning, debug.log probe
+
+The upstream pin (0c94bfb, 2026-11-11) is newer than the Undertale port's
+(92ed6b8) on purpose: GM:S string interpolation - which renders all AM2R
+text - was implemented in c1260061 (2026-11-01, Butterscotch issue #486).
+
+Upstream code retains its own licenses; see upstream/LICENSE (AGPLv3).
+Upstream is vendored under upstream/ and is re-cloneable at the pinned
+commit (see .gitignore).
+
+AM2R game files, artwork and audio are the property of DoctorM64 and the
+AM2R community team (Metroid II itself is Nintendo property) and are not
+covered by the project license.
