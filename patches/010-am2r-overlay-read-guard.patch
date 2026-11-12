@@ -1,0 +1,63 @@
+diff --git a/src/overlay_file_system.c b/src/overlay_file_system.c
+index 7e0e89b6..e176d727 100644
+--- a/src/overlay_file_system.c
++++ b/src/overlay_file_system.c
+@@ -146,17 +146,28 @@ static bool overlayFileExists(FileSystem* fs, const char* relativePath) {
+ static char* overlayReadFileText(FileSystem* fs, const char* relativePath) {
+     char* fullPath = resolveForRead((OverlayFileSystem*) fs, relativePath);
+     FILE* f = fopen(fullPath, "rb");
+-    free(fullPath);
+-    if (f == nullptr) return nullptr;
++    if (f == nullptr) { free(fullPath); return nullptr; }
+ 
+     fseek(f, 0, SEEK_END);
+     long size = ftell(f);
+     fseek(f, 0, SEEK_SET);
+ 
++    /* AM2R diag (patch 010): on-device a text read requested malloc(0x80000000)
++       (ftell gave LONG_MAX) and SIGABRT'd the game (overlay_file_system.c:156).
++       Never trust a nonsense size: log the path and fail the read instead. */
++    if (size < 0 || size > (256L * 1024 * 1024)) {
++        fprintf(stderr, "AM2R diag: overlayReadFileText size=%ld path=%s\n", size, fullPath ? fullPath : "(null)");
++        fflush(stderr);
++        fclose(f);
++        free(fullPath);
++        return nullptr;
++    }
++
+     char* content = (char *)safeMalloc((size_t) size + 1);
+     size_t bytesRead = fread(content, 1, (size_t) size, f);
+     content[bytesRead] = '\0';
+     fclose(f);
++    free(fullPath);
+     return content;
+ }
+ 
+@@ -183,16 +194,25 @@ static bool overlayDeleteFile(FileSystem* fs, const char* relativePath) {
+ static bool overlayReadFileBinary(FileSystem* fs, const char* relativePath, uint8_t** outData, int32_t* outSize) {
+     char* fullPath = resolveForRead((OverlayFileSystem*) fs, relativePath);
+     FILE* f = fopen(fullPath, "rb");
+-    free(fullPath);
+-    if (f == nullptr) return false;
++    if (f == nullptr) { free(fullPath); return false; }
+ 
+     fseek(f, 0, SEEK_END);
+     long size = ftell(f);
+     fseek(f, 0, SEEK_SET);
+ 
++    /* AM2R diag (patch 010): same guard as overlayReadFileText. */
++    if (size < 0 || size > (256L * 1024 * 1024)) {
++        fprintf(stderr, "AM2R diag: overlayReadFileBinary size=%ld path=%s\n", size, fullPath ? fullPath : "(null)");
++        fflush(stderr);
++        fclose(f);
++        free(fullPath);
++        return false;
++    }
++
+     uint8_t* data = (uint8_t *)safeMalloc((size_t) size);
+     size_t bytesRead = fread(data, 1, (size_t) size, f);
+     fclose(f);
++    free(fullPath);
+ 
+     *outData = data;
+     *outSize = (int32_t) bytesRead;
