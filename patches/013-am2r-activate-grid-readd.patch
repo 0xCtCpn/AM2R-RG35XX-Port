@@ -1,5 +1,5 @@
 diff --git a/src/vm_builtins.c b/src/vm_builtins.c
-index fd95b95e..82268a74 100644
+index fd95b95e..61495831 100644
 --- a/src/vm_builtins.c
 +++ b/src/vm_builtins.c
 @@ -8432,8 +8432,19 @@ static RValue builtin_instance_activate_all(MAYBE_UNUSED VMContext* ctx, MAYBE_U
@@ -31,11 +31,11 @@ index fd95b95e..82268a74 100644
 -        if (!instance->active && !instance->destroyed) Runner_setActiveState(ctx->runner, instance, true);
 +        if (!instance->active && !instance->destroyed) {
 +            /* AM2R fix (patch 013): same spatial-grid re-add as activate_all. */
-+            bool wasGridless = (Collision_getSprite(dataWin, instance) != nullptr && arrlen(instance->collisionCells) == 0);
++            bool wasGridless = (Collision_getSprite(ctx->dataWin, instance) != nullptr && arrlen(instance->collisionCells) == 0);
 +            Runner_setActiveState(ctx->runner, instance, true);
 +            SpatialGrid_markInstanceAsDirty(runner->spatialGrid, instance);
 +            if (wasGridless)
-+                logWarn("AM2R diag: activate_object re-added grid-less instance %d (%s) at (%f,%f)\n", instance->instanceId, dataWin->objt.objects[instance->objectIndex].name, instance->x, instance->y);
++                logWarn("AM2R diag: activate_object re-added grid-less instance %d (%s) at (%f,%f)\n", instance->instanceId, ctx->dataWin->objt.objects[instance->objectIndex].name, instance->x, instance->y);
 +        }
      }
      Runner_popInstanceSnapshot(runner, snapBase);
