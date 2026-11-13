@@ -1,0 +1,130 @@
+diff --git a/src/runner.c b/src/runner.c
+index 83d4e4f9..b5905e2d 100644
+--- a/src/runner.c
++++ b/src/runner.c
+@@ -1498,6 +1498,12 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
+         }
+     }
+ 
++    /* AM2R diag (patch 025): room changes log via logInfo (stdout, block-
++       buffered — they only surface in end-of-run flush chunks and cannot be
++       correlated with the stderr diag stream). Mirror them on stderr. */
++    logWarn("AM2R diag: initRoom idx=%d name=%s size=%dx%d frame=%u\n",
++        roomIndex, room->name, room->width, room->height, (unsigned) runner->frameCount);
++
+     // Lazy-room load: if the payload wasn't loaded, read it from the data.win file now before anything touches the room's game objects/tiles/layers.
+     if (!room->payloadLoaded) {
+         DataWin_loadRoomPayload(dataWin, roomIndex);
+diff --git a/src/vm_builtins.c b/src/vm_builtins.c
+index a8cd370c..b9be6040 100644
+--- a/src/vm_builtins.c
++++ b/src/vm_builtins.c
+@@ -8479,11 +8479,24 @@ static RValue builtin_instance_deactivate_object(VMContext* ctx, RValue* args, i
+ 
+     int32_t snapBase = Runner_pushInstancesForTarget(runner, objIndex);
+     int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
++    int32_t am2rDeactivated = 0;
+     for (int32_t i = snapBase; snapEnd > i; i++) {
+         Instance* instance = runner->instanceSnapshots[i];
+-        if (instance->active && !instance->destroyed) Runner_setActiveState(ctx->runner, instance, false);
++        if (instance->active && !instance->destroyed) {
++            Runner_setActiveState(ctx->runner, instance, false);
++            am2rDeactivated++;
++        }
+     }
+     Runner_popInstanceSnapshot(runner, snapBase);
++    /* AM2R diag (patch 025): the streaming controller deactivates oSolid
++       (267) every step when global.objdeactivate is set, then re-activates
++       the in-view ones. If the deactivation count drops to 0 after a room
++       transition while the activation regions also go quiet, the churn
++       stopped entirely — sample every 150 frames. */
++    if ((uint32_t) (runner->frameCount % 150) == 0) {
++        logWarn("AM2R diag: deact-obj obj=%d deactivated=%d frame=%u\n",
++            objIndex, am2rDeactivated, (unsigned) runner->frameCount);
++    }
+     return RValue_makeUndefined();
+ }
+ 
+@@ -8502,6 +8515,7 @@ static RValue builtin_instance_activate_region(VMContext* ctx, RValue* args, int
+ 
+     // We don't use SpatialGrid here because inactive instances are NOT included in the SpatialGrid
+     int instances = arrlen(runner->instances);
++    int32_t am2rActivated = 0;
+     repeat(instances, i) {
+         Instance* inst = runner->instances[i];
+         if (inst->active || inst->destroyed) continue;
+@@ -8520,6 +8534,7 @@ static RValue builtin_instance_activate_region(VMContext* ctx, RValue* args, int
+         }
+ 
+         if (outside != wantInside) {
++            am2rActivated++;
+             /* AM2R fix (patch 013): same spatial-grid re-add as activate_all. */
+             bool wasGridless = (Collision_getSprite(dataWin, inst) != nullptr && arrlen(inst->collisionCells) == 0);
+             Runner_setActiveState(ctx->runner, inst, true);
+@@ -8541,6 +8556,17 @@ static RValue builtin_instance_activate_region(VMContext* ctx, RValue* args, int
+                 logWarn("AM2R diag: activate_region re-added grid-less instance %d (%s) at (%f,%f)\n", inst->instanceId, dataWin->objt.objects[inst->objectIndex].name, inst->x, inst->y);
+         }
+     }
++
++    /* AM2R diag (patch 025): the game's streaming controller builds these
++       regions from oTestKeys.view_* GML variables. If those go stale/wrong
++       after a room change, the regions are misplaced and floors near the
++       player are never re-activated (ground checks miss → fall-through).
++       Sample the region args + activated count every 150 frames. */
++    if ((uint32_t) (runner->frameCount % 150) == 0) {
++        logWarn("AM2R diag: act-region l=%f t=%f w=%f h=%f inside=%d activated=%d frame=%u\n",
++            (double) left, (double) top, (double) width, (double) height,
++            (int) wantInside, am2rActivated, (unsigned) runner->frameCount);
++    }
+     return RValue_makeUndefined();
+ }
+ 
+@@ -12739,10 +12765,13 @@ static void am2rProbeQueryMiss(VMContext* ctx, Instance* other, const char* reas
+     if (hmgeti(am2rSeen, am2rId) >= 0) return;
+     hmput(am2rSeen, am2rId, 1);
+     Runner* am2rRunner = ctx->runner;
+-    logWarn("AM2R diag: pm-miss %s inst %d obj=%d active=%d cells=%d target=%d frame=%u at (%f,%f)\n",
++    Instance* am2rCaller = ctx->currentInstance;
++    logWarn("AM2R diag: pm-miss %s inst %d obj=%d active=%d cells=%d target=%d frame=%u at (%f,%f) caller inst %d obj=%d\n",
+         reason, am2rId, other->objectIndex, (int) other->active,
+         (int) arrlen(other->collisionCells), target, (unsigned) am2rRunner->frameCount,
+-        (double) px, (double) py);
++        (double) px, (double) py,
++        am2rCaller != nullptr ? (int) am2rCaller->instanceId : -1,
++        am2rCaller != nullptr ? am2rCaller->objectIndex : -1);
+ }
+ 
+ static RValue builtin_position_meeting(VMContext* ctx, RValue* args, int32_t argCount) {
+@@ -12808,6 +12837,32 @@ static RValue builtin_position_meeting(VMContext* ctx, RValue* args, int32_t arg
+         }
+     }
+ 
++    /* AM2R diag (patch 025): ground-check flip probe — target 267 is oSolid,
++       the parent of every floor object. Log per-caller state CHANGES of the
++       result: a found=1 -> found=0 flip that never reverts is the exact
++       fall-start frame and position. found=0 -> 1 is rate-limited to once
++       per 60 frames per caller. */
++    if (target == 267 && ctx->currentInstance != nullptr) {
++        static struct { int32_t key; int32_t value; } *am2rFlipState = nullptr;
++        int32_t am2rCallerId = (int32_t) ctx->currentInstance->instanceId;
++        int32_t am2rPrev = hmgeti(am2rFlipState, am2rCallerId) >= 0 ? hmget(am2rFlipState, am2rCallerId) : -1;
++        if (am2rPrev != (int32_t) found) {
++            hmput(am2rFlipState, am2rCallerId, (int32_t) found);
++            bool am2rLogIt = !found;
++            if (found) {
++                static struct { int32_t key; uint32_t value; } *am2rFlipLast = nullptr;
++                uint32_t am2rLast = hmgeti(am2rFlipLast, am2rCallerId) >= 0 ? hmget(am2rFlipLast, am2rCallerId) : 0;
++                am2rLogIt = am2rLast == 0 || (uint32_t) (runner->frameCount - am2rLast) >= 60;
++                if (am2rLogIt) hmput(am2rFlipLast, am2rCallerId, runner->frameCount);
++            }
++            if (am2rLogIt) {
++                logWarn("AM2R diag: pm-flip caller %d obj=%d found=%d at (%f,%f) frame=%u\n",
++                    am2rCallerId, ctx->currentInstance->objectIndex, (int) found,
++                    (double) px, (double) py, (unsigned) runner->frameCount);
++            }
++        }
++    }
++
+     /* AM2R diag (patch 024): falling-caller miss probe — when a caller is
+        dropping fast and the ground check says no floor, capture the query.
+        Rate-limited to once per 30 frames to keep normal airborne misses
