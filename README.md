@@ -1,3 +1,14 @@
+# Super Experimental Port at the moment
+
+**Expect the following bugs:**
+1. Pause causes display bugs wherein some assets might be wrongly colored and destructible objects will become invisible - fixed with transitioning to a new room
+2. Saves only works with v1.0 of AM2R
+3. Some other bugs i have not encountered after the first boss
+
+Anyone is welcome to contribute to this repo to help patch these issues
+
+---
+
 # AM2R (Another Metroid 2 Remake) - MiaUI (RG35XX) Port
 
 AM2R 1.1 on the Anbernic RG35XX running MiaUI, using the open-source Butterscotch GameMaker runner.
@@ -10,13 +21,13 @@ This repo builds AM2R for the Anbernic RG35XX running MiaUI. It cross-compiles t
 
 The build is fully reproducible from source via Docker: run `build.bat` and the binaries land in `out/`. You need to provide your own copy of AM2R — it is not included in the repo or the release.
 
-The build is WAD 14-only (AM2R 1.1 is a GameMaker: Studio 1.4 / WAD 14 game) and pinned to the same upstream commit as the Undertale port (`92ed6b8`, which still has the software renderer this device needs). AM2R's text needs one newer fix — GM:S `string()` placeholder substitution (Butterscotch issue #486) — which is backported as `patches/009-am2r-string-placeholder.patch`.
+The build is WAD 14-only (AM2R v0.1 is a GameMaker: Studio 1.4 / WAD 14 game) and pinned to the same upstream commit as the Undertale port (`92ed6b8`, which still has the software renderer this device needs). AM2R's text needs one newer fix — GM:S `string()` placeholder substitution (Butterscotch issue #486) — which is backported as `patches/009-am2r-string-placeholder.patch`.
 
 ## Install
 
-0. Prepare your AM2R_MiaUI-release-v1.0.zip and your AM2R 1.1 files
+0. Prepare your AM2R_MiaUI-release-v0.1.zip and your AM2R 1.1 files
 1. Extract the zip into PORTS/
-2. Copy all of your AM2R 1.1 files (AM2R.exe, data.win) into /PORTS/AM2R.pak/
+2. Copy all of your AM2R v0.1 files (AM2R.exe, data.win) into /PORTS/AM2R.pak/
 3. Safely eject, boot, go to PORTS -> AM2R
 4. Wait for load (lazy loading makes it longer than Undertale's)
 5. Thats all, you should be booted in the game now so enjoy!
@@ -62,10 +73,6 @@ What the build does (`Dockerfile`):
 * Prints checks at the end: the binary's `INTERP` (want `/lib/ld-linux-armhf.so.3`) and its `NEEDED` libraries
 
 To install your own build: copy `out/*` + `launch.sh` to SD `ROMS/Ports/AM2R.pak/`, then copy your AM2R files into the same folder.
-
-## No bundled libasound (on purpose)
-
-The Undertale MiaUI port's v1.0.0 release shipped a bundled `libasound.so.2` (alsa-lib 1.2.12) which shadowed the system `/usr/lib/libasound.so.2` (1.2.10) via `LD_LIBRARY_PATH` and killed all audio ("No available audio device"). This port never ships one, and its `launch.sh` moves any stale copy aside on first run. AM2R's music plays through the system ALSA stack.
 
 ## Debugging
 
