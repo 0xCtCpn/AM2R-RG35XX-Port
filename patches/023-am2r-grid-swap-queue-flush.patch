@@ -1,0 +1,44 @@
+diff --git a/src/runner.c b/src/runner.c
+index 783aeb1f..57c876e7 100644
+--- a/src/runner.c
++++ b/src/runner.c
+@@ -1492,6 +1492,24 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
+         SpatialGrid_free(runner->spatialGrid);
+     runner->spatialGrid = SpatialGrid_create(room->width, room->height);
+ 
++    /* AM2R fix (patch 023): the old grid — including its dirtyInstances list —
++       was just freed. Any surviving instance still carrying
++       spatialGridDirty=true (queued-but-unsynced in the dead grid) would
++       silently no-op every later markInstanceAsDirty (patch 021 diag proved
++       this: run #10/#11, initRoom no-op bursts) and could never enter this
++       room's grid; stale collisionCells (belonging to the dead grid) also
++       defeat the grid-less re-add checks (patch 013) — restored level floors
++       were permanently collision-invisible after unpausing. Reset both for
++       every instance still in runner->instances (non-persistent ones are
++       freed later; resetting them is harmless). */
++    {
++        int32_t am2rSurvivorCount = (int32_t) arrlen(runner->instances);
++        repeat(am2rSurvivorCount, i) {
++            runner->instances[i]->spatialGridDirty = false;
++            arrsetlen(runner->instances[i]->collisionCells, 0);
++        }
++    }
++
+     // Find position in room order
+     runner->currentRoomOrderPosition = -1;
+     repeat(dataWin->gen8.roomOrderCount, i) {
+@@ -1529,6 +1547,14 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
+         // Event iteration is forward (oldest first), so a persistent instance runs after the room's own instances.
+         int32_t savedCount = (int32_t) arrlen(savedState->instances);
+         repeat(savedCount, i) {
++            /* AM2R fix (patch 023): saved instances were snapshotted with
++               whatever queue state they had at persistRoomState time — a
++               spatialGridDirty=true queued in the (now dead) old grid, and
++               collisionCells belonging to that dead grid. Both must be reset
++               here or the instance never enters this room's grid (the no-op
++               burst in runs #10/#11 were exactly these restored floors). */
++            savedState->instances[i]->spatialGridDirty = false;
++            arrsetlen(savedState->instances[i]->collisionCells, 0);
+             arrput(runner->instances, savedState->instances[i]);
+             Runner_addInstanceToObjectLists(runner, savedState->instances[i]);
+         }
