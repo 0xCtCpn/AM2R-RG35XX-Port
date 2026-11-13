@@ -1,0 +1,67 @@
+diff --git a/src/spatial_grid.c b/src/spatial_grid.c
+index 0aca76b4..67b09302 100644
+--- a/src/spatial_grid.c
++++ b/src/spatial_grid.c
+@@ -72,8 +72,19 @@ void SpatialGrid_syncGrid(Runner* runner, SpatialGrid* grid) {
+         int32_t instanceId = grid->dirtyInstances[i];
+         Instance* instance = hmget(runner->instancesById, instanceId);
+ 
+-        if (instance == nullptr)
++        if (instance == nullptr) {
++            /* AM2R diag (patch 022): a queued ID that no longer resolves is
++               silently dropped WITHOUT clearing the instance flag — but a
++               live instance's ID must always resolve; log it (also proves
++               whether syncGrid even sees the storm entries). */
++            static int am2rNullDiag = 0;
++            if (60 > am2rNullDiag) {
++                am2rNullDiag++;
++                logWarn("AM2R diag: sync-null queued id %d not in instancesById frame=%u [#%d]\n",
++                    (int) instanceId, (unsigned) runner->frameCount, am2rNullDiag);
++            }
+             continue;
++        }
+ 
+         /* AM2R fix (patch 017): an instance queued for sync while active but
+            deactivated before this sync ran used to keep spatialGridDirty set
+@@ -188,6 +199,17 @@ void SpatialGrid_markInstanceAsDirty(SpatialGrid* grid, Instance* dirtyInstance)
+         /* AM2R fix (patch 017): the cells list must reflect actual grid
+            membership, otherwise grid-less checks (patch 013) see stale cells. */
+         arrsetlen(dirtyInstance->collisionCells, 0);
++        /* AM2R diag (patch 022): this branch is SILENT for cells==0 instances
++           (the 014 log requires cells>0). A markDirty on an inactive,
++           grid-less instance silently eats the queue request — if this fires
++           for a storm floor, the flag chain was broken here. */
++        static int am2rStripSilentDiag = 0;
++        if (!dirtyInstance->destroyed && 60 > am2rStripSilentDiag) {
++            am2rStripSilentDiag++;
++            logWarn("AM2R diag: strip-silent inactive grid-less inst %d obj=%d ret=%p base=%p [#%d]\n",
++                (int) dirtyInstance->instanceId, dirtyInstance->objectIndex,
++                __builtin_return_address(0), am2rDiagImageBase(), am2rStripSilentDiag);
++        }
+         return;
+     }
+ 
+diff --git a/src/vm_builtins.c b/src/vm_builtins.c
+index b6ab824d..fc8ec4cc 100644
+--- a/src/vm_builtins.c
++++ b/src/vm_builtins.c
+@@ -8524,6 +8524,19 @@ static RValue builtin_instance_activate_region(VMContext* ctx, RValue* args, int
+             bool wasGridless = (Collision_getSprite(dataWin, inst) != nullptr && arrlen(inst->collisionCells) == 0);
+             Runner_setActiveState(ctx->runner, inst, true);
+             SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
++            /* AM2R diag (patch 022): if markDirty did NOT queue the just
++               activated instance (flag still clear), the queue chain is
++               broken — this is the direct probe for the storm floors. */
++            if (!inst->spatialGridDirty) {
++                static int am2rNoQueueDiag = 0;
++                if (60 > am2rNoQueueDiag) {
++                    am2rNoQueueDiag++;
++                    logWarn("AM2R diag: activate_region markDirty did not queue inst %d obj=%d cells=%d active=%d frame=%u [#%d]\n",
++                        (int) inst->instanceId, inst->objectIndex,
++                        (int) arrlen(inst->collisionCells), (int) inst->active,
++                        (unsigned) ctx->runner->frameCount, am2rNoQueueDiag);
++                }
++            }
+             if (wasGridless)
+                 logWarn("AM2R diag: activate_region re-added grid-less instance %d (%s) at (%f,%f)\n", inst->instanceId, dataWin->objt.objects[inst->objectIndex].name, inst->x, inst->y);
+         }
