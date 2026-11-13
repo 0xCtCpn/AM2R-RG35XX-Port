@@ -1,0 +1,71 @@
+diff --git a/src/spatial_grid.c b/src/spatial_grid.c
+index eedb1656..6a1e25ba 100644
+--- a/src/spatial_grid.c
++++ b/src/spatial_grid.c
+@@ -58,6 +58,16 @@ void SpatialGrid_syncGrid(Runner* runner, SpatialGrid* grid) {
+     logInfo("SpatialGrid: Syncing grid with %d dirty instances\n", arrlen(grid->dirtyInstances));
+ #endif
+ 
++    /* AM2R diag (patch 020): does syncGrid keep running at all after the
++       pause? (If collision queries stop being issued, no sync ever runs and
++       nothing can be re-inserted.) Log the first 20 calls with list size. */
++    static int am2rSyncEntryDiag = 0;
++    if (20 > am2rSyncEntryDiag) {
++        am2rSyncEntryDiag++;
++        logWarn("AM2R diag: sync-entry dirty=%d from ret=%p base=%p [#%d]\n",
++            (int) arrlen(grid->dirtyInstances), __builtin_return_address(0), am2rDiagImageBase(), am2rSyncEntryDiag);
++    }
++
+     repeat(arrlen(grid->dirtyInstances), i) {
+         int32_t instanceId = grid->dirtyInstances[i];
+         Instance* instance = hmget(runner->instancesById, instanceId);
+@@ -74,6 +84,16 @@ void SpatialGrid_syncGrid(Runner* runner, SpatialGrid* grid) {
+            the stale flag so a later markInstanceAsDirty can queue it again. */
+         if (!instance->active || instance->destroyed) {
+             instance->spatialGridDirty = false;
++            /* AM2R diag (patch 020): queued-while-active, inactive-at-sync.
++               If the storm floors show up here, they are inactive at every
++               sync that runs (deactivation window overlaps all queries). */
++            static int am2rSkipDiag = 0;
++            if (60 > am2rSkipDiag) {
++                am2rSkipDiag++;
++                logWarn("AM2R diag: sync-skip inactive dirty inst %d obj=%d cells=%d destroyed=%d [#%d]\n",
++                    (int) instance->instanceId, instance->objectIndex,
++                    (int) arrlen(instance->collisionCells), (int) instance->destroyed, am2rSkipDiag);
++            }
+             continue;
+         }
+ 
+@@ -87,6 +107,12 @@ void SpatialGrid_syncGrid(Runner* runner, SpatialGrid* grid) {
+ 
+         InstanceBBox bbox = Collision_computeBBox(runner, instance);
+ 
++        /* AM2R diag (patch 020): remember whether this instance was grid-less
++           at sync entry — an ACTIVE grid-less instance reaching the insert
++           loop should heal the re-add storm; if this never fires for the
++           floors, they never reach the insert loop. */
++        int32_t am2rCellsBefore = (int32_t) arrlen(instance->collisionCells);
++
+         arrsetlen(instance->collisionCells, 0);
+ 
+         if (!bbox.valid) {
+@@ -112,6 +138,19 @@ void SpatialGrid_syncGrid(Runner* runner, SpatialGrid* grid) {
+             }
+         }
+ 
++        /* AM2R diag (patch 020): a grid-less ACTIVE instance was just
++           inserted — this is the healing path. Rate-limited. */
++        if (am2rCellsBefore == 0) {
++            static int am2rInsertDiag = 0;
++            if (60 > am2rInsertDiag) {
++                am2rInsertDiag++;
++                logWarn("AM2R diag: sync-inserted-from-gridless inst %d obj=%d added=%d at (%f,%f) [#%d]\n",
++                    (int) instance->instanceId, instance->objectIndex,
++                    (int) arrlen(instance->collisionCells),
++                    (double) instance->x, (double) instance->y, am2rInsertDiag);
++            }
++        }
++
+         // And that's it for now!
+     }
+ 
