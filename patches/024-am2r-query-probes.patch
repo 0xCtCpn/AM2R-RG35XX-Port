@@ -1,0 +1,210 @@
+diff --git a/src/runner.c b/src/runner.c
+index 57c876e7..83d4e4f9 100644
+--- a/src/runner.c
++++ b/src/runner.c
+@@ -1472,6 +1472,32 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
+ 
+     Room* room = &dataWin->room.rooms[roomIndex];
+ 
++    /* AM2R diag (patch 024): the game's streaming controller (oTestKeys step)
++       deactivates objects 244/267/280 (267/280 only while global.objdeactivate
++       is set) and there are ZERO instance_deactivate_region calls in the whole
++       game — so the storm floors can only be deactivated via those objects.
++       Print their names + parent chains once, plus the floor-family objects
++       seen storming, to confirm which target owns the floors. */
++    {
++        static bool am2rChainDiagDone = false;
++        if (!am2rChainDiagDone) {
++            am2rChainDiagDone = true;
++            static const int32_t am2rProbeObjects[] = {244, 267, 280, 268, 319, 5, 6, 9, 10, 14, 19, 21};
++            repeat((int32_t) (sizeof(am2rProbeObjects) / sizeof(am2rProbeObjects[0])), i) {
++                int32_t am2rOi = am2rProbeObjects[i];
++                if ((uint32_t) am2rOi >= dataWin->objt.count) continue;
++                GameObject* am2rGo = &dataWin->objt.objects[am2rOi];
++                int32_t am2rParent = am2rGo->parentId;
++                logWarn("AM2R diag: objchain obj %d name=%s parent=%d\n", am2rOi, am2rGo->name, am2rParent);
++                if (am2rParent >= 0 && (uint32_t) am2rParent < dataWin->objt.count) {
++                    GameObject* am2rPg = &dataWin->objt.objects[am2rParent];
++                    logWarn("AM2R diag: objchain   parent %d name=%s grandparent=%d\n",
++                        am2rParent, am2rPg->name, am2rPg->parentId);
++                }
++            }
++        }
++    }
++
+     // Lazy-room load: if the payload wasn't loaded, read it from the data.win file now before anything touches the room's game objects/tiles/layers.
+     if (!room->payloadLoaded) {
+         DataWin_loadRoomPayload(dataWin, roomIndex);
+diff --git a/src/spatial_grid.c b/src/spatial_grid.c
+index 67b09302..91f71256 100644
+--- a/src/spatial_grid.c
++++ b/src/spatial_grid.c
+@@ -108,8 +108,23 @@ void SpatialGrid_syncGrid(Runner* runner, SpatialGrid* grid) {
+             continue;
+         }
+ 
+-        if (!instance->spatialGridDirty)
++        if (!instance->spatialGridDirty) {
++            /* AM2R diag (patch 024): an entry in the dirty list whose flag is
++               already clear (duplicate/orphaned entry — the instance was
++               processed once in this sync, or its flag was cleared while the
++               entry stayed queued). Once per instance. */
++            {
++                static struct { int32_t key; char value; } *am2rOrphanSeen = nullptr;
++                int32_t am2rOrphanId = (int32_t) instance->instanceId;
++                if (hmgeti(am2rOrphanSeen, am2rOrphanId) < 0) {
++                    hmput(am2rOrphanSeen, am2rOrphanId, 1);
++                    logWarn("AM2R diag: sync-orphan in-list flag-clear inst %d obj=%d cells=%d frame=%u\n",
++                        am2rOrphanId, instance->objectIndex,
++                        (int) arrlen(instance->collisionCells), (unsigned) runner->frameCount);
++                }
++            }
+             continue;
++        }
+ 
+         instance->spatialGridDirty = false;
+ 
+@@ -184,32 +199,26 @@ void SpatialGrid_markInstanceAsDirty(SpatialGrid* grid, Instance* dirtyInstance)
+ 
+     if (!dirtyInstance->active || dirtyInstance->destroyed) {
+         // Destroyed instances are updated instantly because, if we didn't, we would need to track the ID + all grids that the instance is in
+-        /* AM2R diag (patch 014): stripping a live-but-inactive instance from the
+-           grid is the suspected cause of post-pause collision loss (60 solids
+-           got stripped+re-added every step after the pause). Log the first ones
+-           with the caller address (decode offline with nm: ret - base + nm_addr). */
+-        static int am2rStripDiag = 0;
+-        if (!dirtyInstance->destroyed && arrlen(dirtyInstance->collisionCells) > 0 && 60 > am2rStripDiag) {
+-            am2rStripDiag++;
+-            logWarn("AM2R diag: grid-strip inactive inst %d at (%f,%f) cells=%d ret=%p base=%p [#%d]\n",
+-                (int) dirtyInstance->instanceId, (double) dirtyInstance->x, (double) dirtyInstance->y,
+-                (int) arrlen(dirtyInstance->collisionCells), __builtin_return_address(0), am2rDiagImageBase(), am2rStripDiag);
++        /* AM2R diag (patch 024): per-instance-once strip probe (replaces the
++           budget-014/022 diags, which burned out in the opening seconds and
++           made every later strip invisible). Anyone stripping a live-but-
++           inactive floor (position writes while deactivated, destroy paths,
++           the streaming controller) shows up here with a decodable ret. */
++        if (!dirtyInstance->destroyed) {
++            static struct { int32_t key; char value; } *am2rStripSeen = nullptr;
++            int32_t am2rStripId = (int32_t) dirtyInstance->instanceId;
++            if (hmgeti(am2rStripSeen, am2rStripId) < 0) {
++                hmput(am2rStripSeen, am2rStripId, 1);
++                logWarn("AM2R diag: strip inst %d obj=%d cells=%d ret=%p base=%p\n",
++                    am2rStripId, dirtyInstance->objectIndex,
++                    (int) arrlen(dirtyInstance->collisionCells),
++                    __builtin_return_address(0), am2rDiagImageBase());
++            }
+         }
+         removeInstanceFromGridCells(grid, dirtyInstance);
+         /* AM2R fix (patch 017): the cells list must reflect actual grid
+            membership, otherwise grid-less checks (patch 013) see stale cells. */
+         arrsetlen(dirtyInstance->collisionCells, 0);
+-        /* AM2R diag (patch 022): this branch is SILENT for cells==0 instances
+-           (the 014 log requires cells>0). A markDirty on an inactive,
+-           grid-less instance silently eats the queue request — if this fires
+-           for a storm floor, the flag chain was broken here. */
+-        static int am2rStripSilentDiag = 0;
+-        if (!dirtyInstance->destroyed && 60 > am2rStripSilentDiag) {
+-            am2rStripSilentDiag++;
+-            logWarn("AM2R diag: strip-silent inactive grid-less inst %d obj=%d ret=%p base=%p [#%d]\n",
+-                (int) dirtyInstance->instanceId, dirtyInstance->objectIndex,
+-                __builtin_return_address(0), am2rDiagImageBase(), am2rStripSilentDiag);
+-        }
+         return;
+     }
+ 
+diff --git a/src/vm_builtins.c b/src/vm_builtins.c
+index fc8ec4cc..a8cd370c 100644
+--- a/src/vm_builtins.c
++++ b/src/vm_builtins.c
+@@ -12726,6 +12726,25 @@ static RValue builtin_instance_position(VMContext* ctx, RValue* args, int32_t ar
+ }
+ 
+ // position_meeting(x, y, obj) - returns true if point (x, y) is inside any instance of obj.
++/* AM2R diag (patch 024): position_meeting is THE ground-check builtin —
++   characterStepEvent uses it for every floor/wall check. Log why a
++   floor-family candidate (low object indices: solids/slopes) failed, once
++   per instance per reason, so a fall can be attributed to: inactive-at-
++   query, descendant-filter miss, bbox miss, or precise-mask miss. If a
++   floor never appears here at all, it was never in the scanned grid cells. */
++static void am2rProbeQueryMiss(VMContext* ctx, Instance* other, const char* reason, GMLReal px, GMLReal py, int32_t target) {
++    if (other->objectIndex > 30) return;
++    static struct { int32_t key; char value; } *am2rSeen = nullptr;
++    int32_t am2rId = (int32_t) other->instanceId;
++    if (hmgeti(am2rSeen, am2rId) >= 0) return;
++    hmput(am2rSeen, am2rId, 1);
++    Runner* am2rRunner = ctx->runner;
++    logWarn("AM2R diag: pm-miss %s inst %d obj=%d active=%d cells=%d target=%d frame=%u at (%f,%f)\n",
++        reason, am2rId, other->objectIndex, (int) other->active,
++        (int) arrlen(other->collisionCells), target, (unsigned) am2rRunner->frameCount,
++        (double) px, (double) py);
++}
++
+ static RValue builtin_position_meeting(VMContext* ctx, RValue* args, int32_t argCount) {
+     if (3 > argCount) return RValue_makeBool(false);
+ 
+@@ -12750,18 +12769,38 @@ static RValue builtin_position_meeting(VMContext* ctx, RValue* args, int32_t arg
+             repeat(cellLen, ci) {
+                 Instance* other = cell[ci];
+                 // Keep in mind that we DO NOT skip "self"
+-                if (!other->active) continue;
++                if (!other->active) {
++                    /* AM2R diag (patch 024): floor INACTIVE at ground-check
++                       time = the player falls through. Once per instance. */
++                    am2rProbeQueryMiss(ctx, other, "inactive", px, py, target);
++                    continue;
++                }
+                 if (other->lastCollisionQueryId == query.queryId) continue;
+                 other->lastCollisionQueryId = query.queryId;
+ 
+-                if (!query.matchAll && query.filterByObject && !VM_isObjectOrDescendant(runner->dataWin, other->objectIndex, target)) continue;
++                if (!query.matchAll && query.filterByObject && !VM_isObjectOrDescendant(runner->dataWin, other->objectIndex, target)) {
++                    /* AM2R diag (patch 024): descendant-filter miss — if the
++                       game queries oSolidParent and the parent links are
++                       broken, floors die HERE. Once per instance. */
++                    am2rProbeQueryMiss(ctx, other, "objfilter", px, py, target);
++                    continue;
++                }
+                 if (!query.matchAll && query.filterByInstanceId && other->instanceId != (uint32_t) target) continue;
+ 
+-                if (!Collision_pointInsideInstanceBox(ctx->runner, other, px, py)) continue;
++                if (!Collision_pointInsideInstanceBox(ctx->runner, other, px, py)) {
++                    /* AM2R diag (patch 024): bbox miss. Once per instance. */
++                    am2rProbeQueryMiss(ctx, other, "bbox-miss", px, py, target);
++                    continue;
++                }
+ 
+                 // GameMaker ALWAYS does precise collision checks here
+                 Sprite* spr = Collision_getSprite(ctx->dataWin, other);
+-                if (Collision_hasFrameMasks(spr) && !Collision_pointInInstance(spr, other, px, py)) continue;
++                if (Collision_hasFrameMasks(spr) && !Collision_pointInInstance(spr, other, px, py)) {
++                    /* AM2R diag (patch 024): precise-mask miss. Once per
++                       instance. */
++                    am2rProbeQueryMiss(ctx, other, "precise-miss", px, py, target);
++                    continue;
++                }
+ 
+                 found = true;
+                 break;
+@@ -12769,6 +12808,22 @@ static RValue builtin_position_meeting(VMContext* ctx, RValue* args, int32_t arg
+         }
+     }
+ 
++    /* AM2R diag (patch 024): falling-caller miss probe — when a caller is
++       dropping fast and the ground check says no floor, capture the query.
++       Rate-limited to once per 30 frames to keep normal airborne misses
++       from flooding the log. */
++    if (!found && ctx->currentInstance != nullptr && ctx->currentInstance->vspeed > 4.0f) {
++        static uint32_t am2rFallFrame = 0;
++        if (am2rFallFrame == 0 || (uint32_t) (runner->frameCount - am2rFallFrame) >= 30) {
++            am2rFallFrame = runner->frameCount;
++            Instance* am2rCaller = ctx->currentInstance;
++            logWarn("AM2R diag: pm-fallmiss caller inst %d obj=%d target=%d vspeed=%f at (%f,%f) frame=%u\n",
++                (int) am2rCaller->instanceId, am2rCaller->objectIndex, target,
++                (double) am2rCaller->vspeed, (double) px, (double) py,
++                (unsigned) runner->frameCount);
++        }
++    }
++
+     return RValue_makeBool(found);
+ }
+ 
