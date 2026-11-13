@@ -1,0 +1,66 @@
+diff --git a/src/spatial_grid.c b/src/spatial_grid.c
+index 6a1e25ba..0aca76b4 100644
+--- a/src/spatial_grid.c
++++ b/src/spatial_grid.c
+@@ -119,12 +119,21 @@ void SpatialGrid_syncGrid(Runner* runner, SpatialGrid* grid) {
+             /* AM2R diag (patch 016): instances silently drop out of the grid here
+                when the collision sprite lookup fails (this is the only remaining
+                path to grid-less besides the markDirty removal branch). */
+-            static int am2rDropDiag = 0;
+-            if (80 > am2rDropDiag) {
+-                am2rDropDiag++;
+-                logWarn("AM2R diag: sync-drop bbox-invalid inst %d spr=%d mask=%d at (%f,%f) [#%d]\n",
+-                    (int) instance->instanceId, instance->spriteIndex, instance->maskIndex,
+-                    (double) instance->x, (double) instance->y, am2rDropDiag);
++            /* AM2R diag (patch 021): the original fixed budget of 80 was
++               exhausted by the 8 sprite-less movers within the first ~10
++               frames, making every later drop invisible (including any
++               post-pause floor drops). Log the FIRST drop per instanceId
++               instead, with the frame number. */
++            {
++                static struct { int32_t key; char value; } *am2rDropSeen = nullptr;
++                int32_t am2rDropId = (int32_t) instance->instanceId;
++                if (hmgeti(am2rDropSeen, am2rDropId) < 0) {
++                    hmput(am2rDropSeen, am2rDropId, 1);
++                    logWarn("AM2R diag: sync-drop bbox-invalid inst %d obj=%d spr=%d mask=%d frame=%u at (%f,%f)\n",
++                        (int) instance->instanceId, instance->objectIndex,
++                        instance->spriteIndex, instance->maskIndex, (unsigned) runner->frameCount,
++                        (double) instance->x, (double) instance->y);
++                }
+             }
+             continue;
+         }
+@@ -182,8 +191,32 @@ void SpatialGrid_markInstanceAsDirty(SpatialGrid* grid, Instance* dirtyInstance)
+         return;
+     }
+ 
+-    if (dirtyInstance->spatialGridDirty)
++    if (dirtyInstance->spatialGridDirty) {
++        /* AM2R diag (patch 021): flag set while NOT in the dirty list is a
++           permanently broken queue state — every further markDirty no-ops
++           and the instance can never re-enter the grid (suspected storm
++           mechanism: state that survived a pause room-reload or a grid
++           swap). A legit duplicate markDirty (flag set, already queued)
++           is excluded by the membership scan; the dirty list is small. */
++        bool am2rQueued = false;
++        repeat(arrlen(grid->dirtyInstances), i) {
++            if (grid->dirtyInstances[i] == dirtyInstance->instanceId) {
++                am2rQueued = true;
++                break;
++            }
++        }
++        if (!am2rQueued) {
++            static int am2rNoQueueDiag = 0;
++            if (60 > am2rNoQueueDiag) {
++                am2rNoQueueDiag++;
++                logWarn("AM2R diag: markDirty no-op flag-set-but-not-queued inst %d obj=%d cells=%d active=%d ret=%p base=%p [#%d]\n",
++                    (int) dirtyInstance->instanceId, dirtyInstance->objectIndex,
++                    (int) arrlen(dirtyInstance->collisionCells), (int) dirtyInstance->active,
++                    __builtin_return_address(0), am2rDiagImageBase(), am2rNoQueueDiag);
++            }
++        }
+         return;
++    }
+ 
+     dirtyInstance->spatialGridDirty = true;
+ 
