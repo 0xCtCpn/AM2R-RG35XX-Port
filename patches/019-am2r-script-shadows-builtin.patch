@@ -1,0 +1,33 @@
+diff --git a/src/vm.c b/src/vm.c
+index 64fd8c7a..de432350 100644
+--- a/src/vm.c
++++ b/src/vm.c
+@@ -3633,14 +3633,22 @@ VMContext* VM_create(DataWin* dataWin) {
+     {
+     repeat(dataWin->func.functionCount, i) {
+         const char* name = dataWin->func.functions[i].name;
++        // A user-defined script shadows a built-in function of the same name
++        // (native GameMaker semantics). AM2R defines its own string_split()
++        // which returns the Nth segment as a STRING; the runner's array-returning
++        // builtin used to shadow it, so the pause prompts drew "<array:...>"
++        // (run #7: the array reached string_width/draw_text from
++        // gml_Script_draw_txt_1button via p_text1 = string_split(...)).
++        // NOTE: codeIndexByName is already populated above (SCPT bare names).
++        ptrdiff_t mapIdx = shgeti(ctx->codeIndexByName, (char*) name);
++        if (mapIdx >= 0) {
++            ctx->funcCallCache[i].builtin = nullptr;
++            ctx->funcCallCache[i].scriptCodeIndex = ctx->codeIndexByName[mapIdx].value;
++            continue;
++        }
+         BuiltinFunc builtin = VM_findBuiltin(ctx, name);
+         ctx->funcCallCache[i].builtin = (void*) builtin;
+-        if (builtin != nullptr) {
+-            ctx->funcCallCache[i].scriptCodeIndex = -1;
+-        } else {
+-            ptrdiff_t mapIdx = shgeti(ctx->codeIndexByName, (char*) name);
+-            ctx->funcCallCache[i].scriptCodeIndex = (mapIdx >= 0) ? ctx->codeIndexByName[mapIdx].value : -1;
+-        }
++        ctx->funcCallCache[i].scriptCodeIndex = -1;
+     }
+     }
+ 
