@@ -1,0 +1,90 @@
+diff --git a/src/runner.c b/src/runner.c
+index b5905e2d..61ba225f 100644
+--- a/src/runner.c
++++ b/src/runner.c
+@@ -1482,7 +1482,7 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
+         static bool am2rChainDiagDone = false;
+         if (!am2rChainDiagDone) {
+             am2rChainDiagDone = true;
+-            static const int32_t am2rProbeObjects[] = {244, 267, 280, 268, 319, 5, 6, 9, 10, 14, 19, 21};
++            static const int32_t am2rProbeObjects[] = {244, 267, 280, 268, 319, 5, 6, 9, 10, 14, 17, 19, 21, 23, 266, 272};
+             repeat((int32_t) (sizeof(am2rProbeObjects) / sizeof(am2rProbeObjects[0])), i) {
+                 int32_t am2rOi = am2rProbeObjects[i];
+                 if ((uint32_t) am2rOi >= dataWin->objt.count) continue;
+diff --git a/src/spatial_grid.c b/src/spatial_grid.c
+index 91f71256..b12a5726 100644
+--- a/src/spatial_grid.c
++++ b/src/spatial_grid.c
+@@ -51,6 +51,28 @@ static void removeInstanceFromGridCells(SpatialGrid* grid, Instance* instance) {
+ }
+ 
+ void SpatialGrid_syncGrid(Runner* runner, SpatialGrid* grid) {
++    /* AM2R diag (patch 026): full floor-family state snapshot every 150
++       frames — active + cells + position for every solid/slope instance,
++       taken at sync entry, so the exact moment a floor near the player
++       loses grid membership (or never gains it) is directly visible. */
++    if ((uint32_t) (runner->frameCount % 150) == 0) {
++        int32_t am2rInstCount = (int32_t) arrlen(runner->instances);
++        repeat(am2rInstCount, i) {
++            Instance* am2rInst = runner->instances[i];
++            switch (am2rInst->objectIndex) {
++                case 5: case 6: case 9: case 10: case 14: case 17: case 19: case 21: case 23: {
++                    logWarn("AM2R diag: floorsnap f=%u inst %d obj=%d (%s) active=%d cells=%d at (%f,%f)\n",
++                        (unsigned) runner->frameCount, (int) am2rInst->instanceId, am2rInst->objectIndex,
++                        runner->dataWin->objt.objects[am2rInst->objectIndex].name,
++                        (int) am2rInst->active, (int) arrlen(am2rInst->collisionCells),
++                        (double) am2rInst->x, (double) am2rInst->y);
++                    break;
++                }
++                default: break;
++            }
++        }
++    }
++
+     bool requiresResync = arrlen(grid->dirtyInstances);
+     if (!requiresResync) return;
+ 
+diff --git a/src/vm_builtins.c b/src/vm_builtins.c
+index b9be6040..905834ff 100644
+--- a/src/vm_builtins.c
++++ b/src/vm_builtins.c
+@@ -12856,13 +12856,36 @@ static RValue builtin_position_meeting(VMContext* ctx, RValue* args, int32_t arg
+                 if (am2rLogIt) hmput(am2rFlipLast, am2rCallerId, runner->frameCount);
+             }
+             if (am2rLogIt) {
+-                logWarn("AM2R diag: pm-flip caller %d obj=%d found=%d at (%f,%f) frame=%u\n",
+-                    am2rCallerId, ctx->currentInstance->objectIndex, (int) found,
+-                    (double) px, (double) py, (unsigned) runner->frameCount);
++                Instance* am2rCaller = ctx->currentInstance;
++                logWarn("AM2R diag: pm-flip caller %d obj=%d (%s) found=%d at (%f,%f) callerxy=(%f,%f) vspeed=%f frame=%u\n",
++                    am2rCallerId, am2rCaller->objectIndex,
++                    runner->dataWin->objt.objects[am2rCaller->objectIndex].name,
++                    (int) found, (double) px, (double) py,
++                    (double) am2rCaller->x, (double) am2rCaller->y,
++                    (double) am2rCaller->vspeed, (unsigned) runner->frameCount);
+             }
+         }
+     }
+ 
++    /* AM2R diag (patch 026): feet-check timeline — every successful ground
++       hit against oSolid, rate-limited per caller to once per 30 frames.
++       The last hit before a long silence marks the fall-start frame and
++       position precisely. */
++    if (found && target == 267 && ctx->currentInstance != nullptr) {
++        static struct { int32_t key; uint32_t value; } *am2rHitLast = nullptr;
++        int32_t am2rHitId = (int32_t) ctx->currentInstance->instanceId;
++        uint32_t am2rHitPrev = hmgeti(am2rHitLast, am2rHitId) >= 0 ? hmget(am2rHitLast, am2rHitId) : 0;
++        if (am2rHitPrev == 0 || (uint32_t) (runner->frameCount - am2rHitPrev) >= 30) {
++            hmput(am2rHitLast, am2rHitId, runner->frameCount);
++            Instance* am2rHitCaller = ctx->currentInstance;
++            logWarn("AM2R diag: pm-ground-hit caller %d obj=%d (%s) at (%f,%f) callerxy=(%f,%f) frame=%u\n",
++                am2rHitId, am2rHitCaller->objectIndex,
++                runner->dataWin->objt.objects[am2rHitCaller->objectIndex].name,
++                (double) px, (double) py, (double) am2rHitCaller->x, (double) am2rHitCaller->y,
++                (unsigned) runner->frameCount);
++        }
++    }
++
+     /* AM2R diag (patch 024): falling-caller miss probe — when a caller is
+        dropping fast and the ground check says no floor, capture the query.
+        Rate-limited to once per 30 frames to keep normal airborne misses
