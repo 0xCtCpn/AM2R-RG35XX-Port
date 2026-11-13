@@ -1,0 +1,39 @@
+diff --git a/src/runner.c b/src/runner.c
+index 61ba225f..55320e86 100644
+--- a/src/runner.c
++++ b/src/runner.c
+@@ -1596,6 +1596,11 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
+         returnPersistentInstances(runner, carriedPersistent);
+ 
+         // No Create events, no preCreateCode, no creationCode, no room creation code
++        /* AM2R diag (patch 027): mirror the restore count on stderr — with the
++           persistRoomState fix this must now include the previously-freed
++           inactive instances (~860 floors in run #15's room, was 125). */
++        logWarn("AM2R diag: restoreRoom idx=%d name=%s savedInstances=%d frame=%u\n",
++            roomIndex, room->name, savedCount, (unsigned) runner->frameCount);
+         logInfo("Runner: Room restored (persistent): %s (room %d) with %d instances\n", room->name, roomIndex, (int) arrlen(runner->instances));
+         return;
+     }
+@@ -3616,7 +3621,21 @@ static void persistRoomState(Runner* runner, int32_t roomIndex) {
+         Instance* inst = runner->instances[i];
+         if (inst->persistent) {
+             arrput(keptInstances, inst);
+-        } else if (inst->active) {
++        } else if (inst->active || !inst->destroyed) {
++            /* AM2R fix (patch 027): inactive instances must be saved, not
++               freed. The level's streaming controller (oTestKeys step) keeps
++               most of the room's floors deactivated at any instant — only
++               instances inside view±200 are active — so freeing inactive
++               instances at pause time destroyed ~7/8 of the room's floors
++               (run #15: 860 floor instances before the pause, 125 after the
++               restore; every floor past x=3712 was gone). The restore path
++               never recreates room instances ("No Create events"), so ~5s of
++               walking after unpausing carried the player off the surviving
++               pocket of floors and it fell through the void. Save inactive
++               instances with their active flag intact — the churn reacts the
++               same way it does pre-pause as they come into view, matching
++               native GMS persistent-room semantics where deactivated
++               instances survive the room change. */
+             arrput(state->instances, inst);
+         } else {
+             hmdel(runner->instancesById, inst->instanceId);
