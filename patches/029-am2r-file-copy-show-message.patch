@@ -1,0 +1,77 @@
+diff --git a/src/vm_builtins.c b/src/vm_builtins.c
+index 905834ff..4d394ea6 100644
+--- a/src/vm_builtins.c
++++ b/src/vm_builtins.c
+@@ -1844,6 +1844,27 @@ static RValue builtin_show_debug_message(MAYBE_UNUSED VMContext* ctx, RValue* ar
+     return RValue_makeUndefined();
+ }
+ 
++/* AM2R diag (patch 029): AM2R's save loader calls show_message_async for
++   "Save Data Corrupted" and load_stats uses it too. The function was missing
++   ("Unknown function"), so the corruption path failed silently. There is no
++   native popup layer on this port — log the message instead so it lands in
++   debug.log. */
++static RValue builtin_show_message_async(MAYBE_UNUSED VMContext* ctx, RValue* args, int32_t argCount) {
++    if (1 > argCount) return RValue_makeUndefined();
++    char* val = RValue_toString(args[0]);
++    logWarn("AM2R diag: show_message_async: %s\n", val);
++    free(val);
++    return RValue_makeUndefined();
++}
++
++static RValue builtin_show_message(MAYBE_UNUSED VMContext* ctx, RValue* args, int32_t argCount) {
++    if (1 > argCount) return RValue_makeUndefined();
++    char* val = RValue_toString(args[0]);
++    logWarn("AM2R diag: show_message: %s\n", val);
++    free(val);
++    return RValue_makeUndefined();
++}
++
+ static RValue builtin_string_length(MAYBE_UNUSED VMContext* ctx, RValue* args, int32_t argCount) {
+     if (1 > argCount) return RValue_makeInt32(0);
+     // GML converts non-string arguments to string before measuring length
+@@ -7611,6 +7632,27 @@ static RValue builtin_file_delete(VMContext* ctx, RValue* args, int32_t argCount
+     return RValue_makeUndefined();
+ }
+ 
++/* AM2R fix (patch 029): AM2R's save system (sv6_*, copy_save, load_stats) copies
++   save files before decrypting/validating them (file_copy -> crypt ->
++   file_text_open_read). The function was missing entirely ("Unknown function"),
++   so the copy never existed, the header check read an empty file, and the
++   game's own corruption handling DELETED the real save and bounced back to the
++   title (runs #16/#17). Implemented over the FileSystem readFileBinary/
++   writeFileBinary pair, which resolve relative paths the same way as every
++   other file_* builtin. Native GM returns 0 on failure and no result on
++   success; callers discard the value (Popz), so 1/-1 is safe. */
++static RValue builtin_file_copy(VMContext* ctx, RValue* args, int32_t argCount) {
++    if (2 > argCount || args[0].type != RVALUE_STRING || args[1].type != RVALUE_STRING) return RValue_makeReal(-1.0);
++    Runner* runner = ctx->runner;
++    FileSystem* fs = runner->fileSystem;
++    uint8_t* data = nullptr;
++    int32_t size = 0;
++    if (!fs->vtable->readFileBinary(fs, args[0].string, &data, &size)) return RValue_makeReal(-1.0);
++    bool ok = fs->vtable->writeFileBinary(fs, args[1].string, data, size);
++    free(data);
++    return RValue_makeReal(ok ? 1.0 : -1.0);
++}
++
+ // ===[ File Find Functions ]===
+ 
+ // Case-sensitive `*` / `?` wildcard match:
+@@ -17598,6 +17640,8 @@ void VMBuiltins_registerAll(VMContext* ctx) {
+ 
+     // Core output
+     VM_registerBuiltin(ctx, "show_debug_message", builtin_show_debug_message);
++    VM_registerBuiltin(ctx, "show_message", builtin_show_message);
++    VM_registerBuiltin(ctx, "show_message_async", builtin_show_message_async);
+ 
+     // String functions
+     VM_registerBuiltin(ctx, "string_length", builtin_string_length);
+@@ -18034,6 +18078,7 @@ void VMBuiltins_registerAll(VMContext* ctx) {
+     VM_registerBuiltin(ctx, "file_text_write_real", builtin_file_text_write_real);
+     VM_registerBuiltin(ctx, "file_text_eof", builtin_file_text_eof);
+     VM_registerBuiltin(ctx, "file_delete", builtin_file_delete);
++    VM_registerBuiltin(ctx, "file_copy", builtin_file_copy);
+     VM_registerBuiltin(ctx, "file_find_first", builtin_file_find_first);
+     VM_registerBuiltin(ctx, "file_find_next", builtin_file_find_next);
+     VM_registerBuiltin(ctx, "file_find_close", builtin_file_find_close);
