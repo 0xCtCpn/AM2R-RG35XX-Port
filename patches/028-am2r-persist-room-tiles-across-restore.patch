@@ -1,0 +1,103 @@
+diff --git a/src/runner.c b/src/runner.c
+index 55320e86..fde8451b 100644
+--- a/src/runner.c
++++ b/src/runner.c
+@@ -1573,6 +1573,32 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
+         runner->runtimeLayers = savedState->runtimeLayers;
+         savedState->runtimeLayers = nullptr;
+ 
++        /* AM2R fix (patch 028): restore the room's tile array snapshot. Under
++           --lazy-rooms, leaving the room at pause time freed the payload via
++           DataWin_freeRoomPayload, so the load above re-parsed the raw ROOM
++           chunk. The restore path never runs room/instance creation code, so
++           the raw parse resurrects every time-of-day tile variant that
++           tile_layer_delete removed in load_timeofday_bgs (AM2R's surface
++           rooms stack day/twilight/night grass tiles — night sits at depth
++           -120/-121, drawn on top of the day variant at -100/-101, which
++           turned the grass blue after unpause) and loses every runtime
++           tile_add tile (AM2R's destructible rocks get their visuals from
++           link_tile/link_surface_tile in creation code). Swapping in the
++           exact array persisted at pause time keeps both the layer deletions
++           and the runtime tiles, and the restored tile ids match the tileid
++           values the saved oSolid instances carry below, so tile_exists and
++           tile_delete keep working. */
++        if (savedState->hasTilesSnapshot) {
++            free(room->tiles);
++            room->tiles = savedState->tilesSnapshot;
++            room->tileCount = savedState->tilesSnapshotCount;
++            savedState->tilesSnapshot = nullptr;
++            savedState->tilesSnapshotCount = 0;
++            savedState->hasTilesSnapshot = false;
++            runner->drawableListStructureDirty = true;
++            logWarn("AM2R diag: restoreTiles idx=%d name=%s count=%u\n", roomIndex, room->name, room->tileCount);
++        }
++
+         Instance** carriedPersistent = takePersistentInstances(runner);
+ 
+         // The native runner restores the room's own linked list first, then appends persistent arrivals at the tail.
+@@ -1931,6 +1957,10 @@ static void cleanupState(Runner* runner) {
+             arrfree(state->instances);
+             hmfree(state->tileLayerMap);
+             freeRuntimeLayersArray(&state->runtimeLayers);
++            free(state->tilesSnapshot);
++            state->tilesSnapshot = nullptr;
++            state->tilesSnapshotCount = 0;
++            state->hasTilesSnapshot = false;
+         }
+         free(runner->savedRoomStates);
+     }
+@@ -3612,6 +3642,10 @@ static void persistRoomState(Runner* runner, int32_t roomIndex) {
+     hmfree(state->tileLayerMap);
+     state->tileLayerMap = nullptr;
+     freeRuntimeLayersArray(&state->runtimeLayers);
++    free(state->tilesSnapshot);
++    state->tilesSnapshot = nullptr;
++    state->tilesSnapshotCount = 0;
++    state->hasTilesSnapshot = false;
+ 
+     // Separate persistent instances (travel with player) from room instances (saved)
+     Instance** keptInstances = nullptr;
+@@ -3671,6 +3705,29 @@ static void persistRoomState(Runner* runner, int32_t roomIndex) {
+     state->runtimeLayers = runner->runtimeLayers;
+     runner->runtimeLayers = nullptr;
+ 
++    /* AM2R fix (patch 028): snapshot the room's tile array. Under
++       --lazy-rooms the outgoing room's payload (including room->tiles) is
++       freed right after this, and DataWin_loadRoomPayload re-parses the raw
++       ROOM chunk on return. Without this snapshot a persistent-room restore
++       shows the raw static tiles: every time-of-day variant tile_layer_delete
++       removed comes back stacked (AM2R surface rooms place the night grass at
++       depth -120/-121 on top of day at -100/-101 — the "blue grass after
++       pause" bug), and every runtime tile_add tile from link_tile /
++       link_surface_tile (destructible rock visuals) is gone while the saved
++       oSolid instances keep pointing at the now-freed tile ids. A count of 0
++       is a valid snapshot (the room may legitimately have all its tile layers
++       deleted), which is why hasTilesSnapshot is a separate flag. */
++    {
++        Room* persistedRoom = &runner->dataWin->room.rooms[roomIndex];
++        state->hasTilesSnapshot = true;
++        state->tilesSnapshotCount = persistedRoom->tileCount;
++        if (persistedRoom->tileCount != 0 && persistedRoom->tiles != nullptr) {
++            state->tilesSnapshot = (RoomTile *) safeMalloc(persistedRoom->tileCount * sizeof(RoomTile));
++            memcpy(state->tilesSnapshot, persistedRoom->tiles, (size_t) persistedRoom->tileCount * sizeof(RoomTile));
++        }
++        logWarn("AM2R diag: persistTiles idx=%d name=%s count=%u\n", roomIndex, persistedRoom->name, persistedRoom->tileCount);
++    }
++
+     state->initialized = true;
+ }
+ 
+diff --git a/src/runner.h b/src/runner.h
+index 74eb4daa..d5dd4c5e 100644
+--- a/src/runner.h
++++ b/src/runner.h
+@@ -423,6 +423,9 @@ typedef struct {
+     RuntimeView views[MAX_VIEWS];
+     bool viewsEnabled;
+     GMLCamera defaultCameras[MAX_DEFAULT_ROOM_CAMERAS]; // whole-array snapshot of Runner.defaultCameras (room-scoped)
++    bool hasTilesSnapshot;
++    uint32_t tilesSnapshotCount;
++    RoomTile* tilesSnapshot; // owned copy of Room.tiles at persist time; transferred back to Room.tiles on restore
+ } SavedRoomState;
+ 
+ // One flattened collision event entry. Mirrors ObjectEvent but adds the resolved codeId and ownerObjectIndex (the ancestor that actually defines the event) so dispatch needs no event-table lookup.
