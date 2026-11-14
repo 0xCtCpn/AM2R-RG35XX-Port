@@ -1,19 +1,8 @@
-# Super Experimental Port at the moment
-
-**Expect the following bugs:**
-1. Pause causes display bugs wherein some assets might be wrongly colored and destructible objects will become invisible - fixed with transitioning to a new room
-2. Saves only works with v1.0 of AM2R
-3. Some other bugs i have not encountered after the first boss
-
-Anyone is welcome to contribute to this repo to help patch these issues
-
----
-
 # AM2R (Another Metroid 2 Remake) - MiaUI (RG35XX) Port
 
-AM2R 1.1 on the Anbernic RG35XX running MiaUI, using the open-source Butterscotch GameMaker runner.
+AM2R on the Anbernic RG35XX running MiaUI, using the open-source Butterscotch GameMaker runner.
 
-Needs the original (Non-H700) RG35XX with MiaUI v2.0.0, the release zip, and your own AM2R 1.1 files.
+Needs the original (Non-H700) RG35XX with MiaUI v2.0.0, the release zip, and your own AM2R v1.0 files.
 
 ## Overview
 
@@ -23,13 +12,15 @@ The build is fully reproducible from source via Docker: run `build.bat` and the 
 
 The build is WAD 14-only (AM2R v0.1 is a GameMaker: Studio 1.4 / WAD 14 game) and pinned to the same upstream commit as the Undertale port (`92ed6b8`, which still has the software renderer this device needs). AM2R's text needs one newer fix — GM:S `string()` placeholder substitution (Butterscotch issue #486) — which is backported as `patches/009-am2r-string-placeholder.patch`.
 
+Performance note: AM2R is heavier than Undertale (bigger rooms, more instances). The launcher pins all cores to the 1.49 GHz performance governor, and the runner runs with `--lazy-rooms --lazy-textures --lazy-audio --load-type load-per-chunk` (required — the device has 256 MB RAM and AM2R 1.1's data.win is several times Undertale's).
+
 ## Install
 
-0. Prepare your AM2R_MiaUI-release-v0.1.zip and your AM2R 1.1 files
+0. Prepare your AM2R_MiaUI-release-vX.X.zip and your AM2R v1.0 files
 1. Extract the zip into PORTS/
-2. Copy all of your AM2R v0.1 files (AM2R.exe, data.win) into /PORTS/AM2R.pak/
+2. Copy all of your AM2R v1.0 files (AM2R.exe, data.win) into /PORTS/AM2R.pak/
 3. Safely eject, boot, go to PORTS -> AM2R
-4. Wait for load (lazy loading makes it longer than Undertale's)
+4. Wait for load
 5. Thats all, you should be booted in the game now so enjoy!
 
 ## SD folder structure
@@ -41,7 +32,7 @@ Ports/
     butterscotch
     libSDL-1.2.so.0
     gamecontrollerdb.txt
-    # Your AM2R 1.1 game files (AM2R.exe, data.win)
+    # Your AM2R v1.0 game files (AM2R.exe, data.win)
 ```
 
 ## Controls
@@ -78,16 +69,15 @@ To install your own build: copy `out/*` + `launch.sh` to SD `ROMS/Ports/AM2R.pak
 
 If crashing open `ROMS/Ports/AM2R.pak/debug.log` and check/submit the error. The build includes `[stage]` init markers, per-chunk loader logs, and `FPSLOG:` per-300-frame phase timing lines to make hangs and slowdowns attributable.
 
-Performance note: AM2R is heavier than Undertale (bigger rooms, more instances). The launcher pins all cores to the 1.49 GHz performance governor, and the runner runs with `--lazy-rooms --lazy-textures --lazy-audio --load-type load-per-chunk` (required — the device has 256 MB RAM and AM2R 1.1's data.win is several times Undertale's).
 
 ## Credits
 
 Thanks to:
 
 * [cobaltgit](https://github.com/cobaltgit/Butterscotch) — Butterscotch GameMaker runner (AGPLv3, pinned at `92ed6b8`, vendored under `upstream/`)
-* [ButterscotchRunner](https://github.com/ButterscotchRunner/Butterscotch) — active upstream development, source of the `string()` placeholder fix backported in patch 009
-* DoctorM64 and the AM2R community team — AM2R
+* [ButterscotchRunner](https://github.com/ButterscotchRunner/Butterscotch) — active upstream development
 * DSkywalk for [MiaUI](https://github.com/miaui-cfw/MiaUI-GPU-RG35XX)
+* DoctorM64 and the AM2R community team — AM2R
 * libsdl and ALSA upstreams for the bundled dependencies
 * Nintendo — Metroid II: Return of Samus (AM2R is a non-commercial fan remake)
 
