@@ -12,7 +12,7 @@ The build is fully reproducible from source via Docker: run `build.bat` and the 
 
 The build is WAD 14-only (AM2R v0.1 is a GameMaker: Studio 1.4 / WAD 14 game) and pinned to the same upstream commit as the Undertale port (`92ed6b8`, which still has the software renderer this device needs). AM2R's text needs one newer fix — GM:S `string()` placeholder substitution (Butterscotch issue #486) — which is backported as `patches/009-am2r-string-placeholder.patch`.
 
-Performance note: AM2R is heavier than Undertale (bigger rooms, more instances). The launcher pins all cores to the 1.49 GHz performance governor, and the runner runs with `--lazy-rooms --lazy-textures --lazy-audio --load-type load-per-chunk` (required — the device has 256 MB RAM and AM2R 1.1's data.win is several times Undertale's).
+Performance note: The launcher pins all cores to the 1.49 GHz performance governor, and the runner runs with `--lazy-rooms --lazy-textures --lazy-audio --load-type load-per-chunk`, since the device has 256 MB RAM.
 
 ## Install
 
